@@ -229,8 +229,10 @@ async function runTool(name, a, cards, seen, till) {
     const fold = s => String(s).toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
     const words = fold(a.query || '').split(/[^a-z0-9]+/).filter(w => w.length > 1).map(w => w.replace(/s$/, ''));
     const score = p => { const h = fold(`${p.sku} ${p.en} ${p.sq} ${p.tags}`); return words.filter(w => h.includes(w)).length; };
-    const hits = catalog.products.map(p => [score(p), p]).filter(([s]) => !words.length || s > 0)
-      .sort((x, y) => y[0] - x[0]).map(([, p]) => p);
+    // Only the best-scoring items: offering "USB-C charger" next to "USB-C cable" invites the model to pick wrong.
+    const scored = catalog.products.map(p => [score(p), p]);
+    const best = Math.max(...scored.map(([s]) => s));
+    const hits = scored.filter(([s]) => !words.length || (s > 0 && s === best)).map(([, p]) => p);
     for (const p of hits.length ? hits : catalog.products) seen.add(p.sku);
     return { currency: CUR, products: (hits.length ? hits : catalog.products).map(({ sku, en, sq, price }) => ({ sku, en, sq, price })),
              note: hits.length ? undefined : 'No match — full catalogue returned' };
