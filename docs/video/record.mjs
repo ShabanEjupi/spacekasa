@@ -27,6 +27,20 @@ for (const [i, seg] of script.entries()) {
     acted = now();
   }
   if (seg.click) { await sleep(1.2); await p.click(seg.click); acted = now(); }
+  if (seg.pay) {
+    // The customer's phone: a separate, unrecorded browser pays the newest QR in the PayPal sandbox.
+    const url = await p.locator('.card.payment a.btn').last().getAttribute('href');
+    const buyer = await (await b.newContext({ locale: 'en-US' })).newPage();
+    await buyer.goto(url);
+    await buyer.fill('#email', process.env.BUYER_EMAIL, { timeout: 60000 });
+    await buyer.click('#btnNext');
+    await buyer.fill('#password', process.env.BUYER_PASS, { timeout: 30000 });
+    await buyer.click('#btnLogin');
+    await buyer.locator('#payment-submit-btn, button:has-text("Complete Purchase")').first().click({ timeout: 60000 });
+    await buyer.waitForURL(/\/paid\?/, { timeout: 60000 });
+    await buyer.context().close();
+    acted = now();
+  }
   let done = acted;
   if (seg.until) {
     // Wait until one MORE element matches than before the action.

@@ -5,6 +5,8 @@ set -euo pipefail
 BASE=${1:-https://kasa.spacecode.tech}
 OUT=${2:-/mnt/data/spacekasa-video}
 HERE=$(cd "$(dirname "$0")" && pwd)
+# Sandbox buyer for the "pay" segment (a PayPal sandbox Personal account, US).
+BUYER_EMAIL=${BUYER_EMAIL:?set BUYER_EMAIL}; BUYER_PASS=${BUYER_PASS:?set BUYER_PASS}
 VOICE=${VOICE:-en-US-AndrewMultilingualNeural}
 mkdir -p "$OUT"
 cp "$HERE"/script.json "$HERE"/record.mjs "$HERE"/compose.mjs "$OUT"/
@@ -26,7 +28,7 @@ echo "[$durs]" > "$OUT"/durations.json
 
 echo "2/4 recording against $BASE"
 sudo docker run --rm --network host -v "$OUT":/o mcr.microsoft.com/playwright:v1.55.0-noble sh -c \
-  "cd /tmp && npm i -s playwright@1.55.0 >/dev/null 2>&1 && cp /o/record.mjs /o/script.json . && node record.mjs $BASE /o"
+  "cd /tmp && npm i -s playwright@1.55.0 >/dev/null 2>&1 && cp /o/record.mjs /o/script.json . && BUYER_EMAIL=$BUYER_EMAIL BUYER_PASS=$BUYER_PASS node record.mjs $BASE /o"
 
 echo "3/4 compose"
 sudo docker run --rm -v "$OUT":/o node:22-slim node /o/compose.mjs /o
