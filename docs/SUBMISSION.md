@@ -28,7 +28,7 @@ A single Node 22 server with no npm dependencies. The model gets seven tools: `f
 
 ## Challenges
 - Small models drift between languages and sometimes propose twice (a partial basket, then the corrected one). We pin the reply language on each turn and let a newer proposal replace the earlier one.
-- PayPal sandbox compliance rules depend on the buyer's country, so captures need a US sandbox buyer.
+- PayPal sandbox compliance rules depend on the merchant's country: captures failed with COMPLIANCE_VIOLATION until we moved to a US sandbox merchant.
 
 ## What we learned
 Agentic commerce works when the agent handles language and judgement, and the system holds the money and the prices. Splitting the work this way made the AI part *more* useful, because we could let it act freely.
