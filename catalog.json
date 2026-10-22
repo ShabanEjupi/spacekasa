@@ -1,0 +1,26 @@
+{
+  "shop": "Demo corner shop",
+  "currency": "EUR",
+  "products": [
+    { "sku": "COF-ESP", "en": "Espresso", "sq": "Espresso", "price": "1.00", "tags": "coffee kafe" },
+    { "sku": "COF-MAC", "en": "Macchiato", "sq": "Makiato", "price": "1.20", "tags": "coffee kafe makiato" },
+    { "sku": "TEA-BLK", "en": "Black tea", "sq": "Çaj i zi", "price": "0.80", "tags": "tea caj çaj" },
+    { "sku": "WAT-05", "en": "Still water 0.5 L", "sq": "Ujë pa gaz 0.5 L", "price": "0.50", "tags": "water uje ujë" },
+    { "sku": "WAT-15", "en": "Still water 1.5 L", "sq": "Ujë pa gaz 1.5 L", "price": "0.90", "tags": "water uje ujë" },
+    { "sku": "JUI-ORG", "en": "Orange juice 1 L", "sq": "Lëng portokalli 1 L", "price": "1.60", "tags": "juice leng lëng" },
+    { "sku": "BRD-WHT", "en": "White bread", "sq": "Bukë e bardhë", "price": "0.60", "tags": "bread buke bukë" },
+    { "sku": "BRD-WHL", "en": "Wholegrain bread", "sq": "Bukë integrale", "price": "0.90", "tags": "bread buke bukë integrale" },
+    { "sku": "MLK-1L", "en": "Milk 1 L", "sq": "Qumësht 1 L", "price": "1.10", "tags": "milk qumesht qumësht" },
+    { "sku": "RCE-1KG", "en": "Rice 1 kg", "sq": "Oriz 1 kg", "price": "1.80", "tags": "rice oriz" },
+    { "sku": "OIL-1L", "en": "Sunflower oil 1 L", "sq": "Vaj luledielli 1 L", "price": "2.20", "tags": "oil vaj" },
+    { "sku": "SUG-1KG", "en": "Sugar 1 kg", "sq": "Sheqer 1 kg", "price": "1.00", "tags": "sugar sheqer" },
+    { "sku": "DAT-500", "en": "Dates 500 g", "sq": "Hurma 500 g", "price": "3.50", "tags": "dates hurma" },
+    { "sku": "HNY-450", "en": "Honey 450 g", "sq": "Mjaltë 450 g", "price": "6.00", "tags": "honey mjalte mjaltë" },
+    { "sku": "CHG-USBC", "en": "USB-C phone charger", "sq": "Karikues telefoni USB-C", "price": "8.50", "tags": "charger karikues usb" },
+    { "sku": "CBL-USBC", "en": "USB-C cable 1 m", "sq": "Kabllo USB-C 1 m", "price": "3.00", "tags": "cable kabllo usb" },
+    { "sku": "BAT-AA4", "en": "AA batteries (4)", "sq": "Bateri AA (4 copë)", "price": "2.50", "tags": "batteries bateri" },
+    { "sku": "NTB-A5", "en": "A5 notebook", "sq": "Fletore A5", "price": "1.50", "tags": "notebook fletore" },
+    { "sku": "PEN-BLU", "en": "Blue pen", "sq": "Stilolaps i kaltër", "price": "0.40", "tags": "pen stilolaps" },
+    { "sku": "PHN-RPR", "en": "Phone screen repair (service)", "sq": "Ndërrim ekrani telefoni (shërbim)", "price": "35.00", "tags": "repair riparim ekran servis" }
+  ]
+}

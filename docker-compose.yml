@@ -1,0 +1,12 @@
+services:
+  spacekasa:
+    build: .
+    container_name: spacekasa
+    restart: always
+    network_mode: bridge
+    ports:
+      - "127.0.0.1:8310:8080"
+    volumes:
+      - /mnt/data/spacekasa:/data
+    env_file: .env
+    mem_limit: 256m

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>SpaceKasa</title>
+<meta name="description" content="Talk to your till: an AI shop assistant that takes PayPal payments.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo" aria-hidden="true"></span><b>SpaceKasa</b><small data-t="tagline"></small></div>
+  <div class="tools">
+    <span class="sandbox" data-t="sandbox"></span>
+    <button id="lang" class="ghost" aria-label="Language">SQ</button>
+  </div>
+</header>
+<main>
+  <section id="chat" aria-live="polite">
+    <div class="intro">
+      <h1 data-t="h1"></h1>
+      <p data-t="intro"></p>
+      <div id="examples"></div>
+    </div>
+  </section>
+  <aside>
+    <h2 data-t="today"></h2>
+    <div id="summary"></div>
+    <ol id="payments"></ol>
+  </aside>
+</main>
+<form id="ask" autocomplete="off">
+  <button type="button" id="mic" class="ghost" aria-label="Speak">🎙</button>
+  <input id="q" maxlength="500" enterkeyhint="send">
+  <button id="go" class="primary" type="submit" data-t="send"></button>
+</form>
+<script src="/app.js"></script>
+</body>
+</html>
