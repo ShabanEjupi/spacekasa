@@ -10,7 +10,7 @@ const T = {
         scan: 'Customer scans to pay', open: 'Open payment page', copy: 'Copy link', copied: 'Copied',
         awaiting_payment: 'Waiting for payment', paid: 'Paid', refunded: 'Refunded', cancelled: 'Cancelled', failed: 'Declined by PayPal',
         paid_s: 'paid', awaiting_s: 'waiting', none: 'No payments yet.', thinking: 'Thinking…', err: 'Something went wrong',
-        listening: 'Listening…', for: 'for',
+        listening: 'Listening…', for: 'for', verify: 'Verify receipt',
         ex: ['Two macchiatos and a small water, she pays now', 'Invoice Blue Desk office for 12 cappuccinos, office@example.com', 'How much did we take today?'] },
   sq: { tagline: 'fol me arkën', sandbox: 'PayPal sandbox', h1: 'Thuaj çka po blen klienti.',
         intro: 'SpaceKasa i gjen artikujt, ua merr çmimin nga katalogu dhe përgatit QR ose faturë PayPal. Çdo pagesë e konfirmon ti.',
@@ -19,7 +19,7 @@ const T = {
         scan: 'Klienti e skanon për të paguar', open: 'Hap faqen e pagesës', copy: 'Kopjo lidhjen', copied: 'U kopjua',
         awaiting_payment: 'Në pritje të pagesës', paid: 'U pagua', refunded: 'U kthye', cancelled: 'U anulua', failed: 'PayPal e refuzoi',
         paid_s: 'paguar', awaiting_s: 'në pritje', none: 'Ende asnjë pagesë.', thinking: 'Po mendoj…', err: 'Diçka shkoi keq',
-        listening: 'Po dëgjoj…', for: 'për',
+        listening: 'Po dëgjoj…', for: 'për', verify: 'Verifiko kuponin',
         ex: ['Dy makiato dhe një ujë i vogël, paguan tani', 'Faturo zyrën Blue Desk për 12 kapuçino, office@example.com', 'Sa kemi xhiru sot?'] },
 };
 let lang = 'en';
@@ -119,6 +119,11 @@ function paymentCard(p) {
     cp.onclick = () => navigator.clipboard?.writeText(p.url).then(() => { cp.textContent = t('copied'); });
     row.append(a, cp);
     box.append(row);
+  }
+  if (p.receipt) {
+    const v = el('a', 'ghost btn receipt', t('verify'));
+    v.href = p.receipt; v.target = '_blank'; v.rel = 'noopener';
+    box.append(v);
   }
   if (p.status === 'awaiting_payment') watch(p.ref, box);
   return box;

@@ -18,13 +18,13 @@ mkdir -p "$OUT"; rm -f "$OUT"/a*.mp3
 cp "$HERE"/script.json "$HERE"/record.mjs "$HERE"/compose.mjs "$OUT"/
 
 echo "1/4 narration ($VOICE)"
-sudo docker run --rm -v "$OUT":/o -e VOICE="$VOICE" -e FIELD="$FIELD" python:3.12-slim sh -c '
+sudo docker run --rm -v "$OUT":/o -e VOICE="$VOICE" -e FIELD="$FIELD" -e RATE="${RATE:-+2%}" python:3.12-slim sh -c '
   pip install -q edge-tts >/dev/null 2>&1
   python - <<PY
 import json, subprocess, os, time
 for i, s in enumerate(json.load(open("/o/script.json"))):
     for attempt in range(4):  # the free endpoint drops a request now and then
-        if subprocess.run(["edge-tts", "--voice", os.environ["VOICE"], "--rate=+2%", "--text", s[os.environ["FIELD"]], "--write-media", f"/o/a{i}.mp3"]).returncode == 0: break
+        if subprocess.run(["edge-tts", "--voice", os.environ["VOICE"], "--rate=" + os.environ.get("RATE", "+2%"), "--text", s[os.environ["FIELD"]], "--write-media", f"/o/a{i}.mp3"]).returncode == 0: break
         time.sleep(5 * (attempt + 1))
     else: raise SystemExit(f"no audio for segment {i}")
 PY'

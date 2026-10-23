@@ -35,10 +35,10 @@ const moveTo = async sel => {
 
 const T = {
   en: { intro: ['SpaceKasa', 'Talk to your till.', 'A language-model assistant for small cafés · payments by PayPal'],
-        outro: ['SpaceKasa', 'Prices only from the menu · No money moves without a tap · Refunds capped at what was paid',
+        outro: ['SpaceKasa', 'Prices only from the menu · Agents spend only inside signed mandates · Books with a witness',
                 'kasa.spacecode.tech · git.spacecode.tech/shaban/spacekasa'] },
   sq: { intro: ['SpaceKasa', 'Fol me arkën.', 'Asistent me model gjuhësor për kafenetë e vogla · pagesat me PayPal'],
-        outro: ['SpaceKasa', 'Çmimet vetëm nga menyja · Asnjë pagesë pa prekjen e njeriut · Kthimi sa u pagua',
+        outro: ['SpaceKasa', 'Çmimet vetëm nga menyja · Agjentët shpenzojnë vetëm brenda mandatit · Libra me dëshmitar',
                 'kasa.spacecode.tech · git.spacecode.tech/shaban/spacekasa'] },
 };
 const card = ([title, big, small]) => `<!doctype html><meta charset="utf-8"><style>
@@ -57,7 +57,7 @@ let phone;
 const sels = [...new Set(script.map(s => s.until).filter(Boolean))];
 for (const [i, seg] of script.entries()) {
   const start = now();
-  const acts = seg.type || seg.click || seg.pay || seg.goto || seg.card;
+  const acts = seg.type || seg.click || seg.pay || seg.goto || seg.card || seg.visit;
   if (seg.card) await p.setContent(card(T[lang][seg.card]));
   if (seg.goto) { await p.goto(base); await p.mouse.move(mouse.x, mouse.y); await sleep(1.2); }
   if (acts) await p.evaluate(ss => ss.forEach(s => document.querySelectorAll(s).forEach(e => { e.dataset.seen = 1; })), sels);
@@ -70,6 +70,10 @@ for (const [i, seg] of script.entries()) {
     acted = now();
   }
   if (seg.click) { await sleep(1.0); await moveTo(seg.click); await sleep(0.4); await p.mouse.down(); await p.mouse.up(); acted = now(); }
+  // Scroll a panel so the narration can point at what is below the fold.
+  if (seg.scroll) await p.evaluate(([s, y]) => document.querySelector(s)?.scrollTo({ top: y, behavior: 'smooth' }), seg.scroll);
+  // Open the newest receipt check in the same tab, as the customer's QR would.
+  if (seg.visit) { const href = await p.locator(seg.visit).last().getAttribute('href'); await p.goto(new URL(href, base).href); acted = now(); }
   if (seg.pay) {
     // The customer's phone: a separate browser, recorded on its own, pays the newest QR in the PayPal sandbox.
     const url = await p.locator('.card.payment a.btn').last().getAttribute('href');
