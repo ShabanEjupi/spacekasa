@@ -227,8 +227,9 @@ async function runTool(name, a, cards, seen, till) {
   if (name === 'find_products') {
     // Rank by how many query words an item matches, so "chocolate croissant" puts it above the plain croissant.
     const fold = s => String(s).toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
-    const words = fold(a.query || '').split(/[^a-z0-9]+/).filter(w => w.length > 1).map(w => w.replace(/s$/, ''));
-    const score = p => { const h = fold(`${p.sku} ${p.en} ${p.sq} ${p.tags}`); return words.filter(w => h.includes(w)).length; };
+    const words = fold(a.query || '').split(/[^a-z0-9]+/).filter(w => w.length > 1 && !/^\d+$/.test(w)).map(w => w.replace(/s$/, ''));
+    // A query word must START a catalogue word: "me" (Albanian "with") inside "home" made coffee beans the only match for "kafe me qumesht".
+    const score = p => { const h = fold(`${p.sku} ${p.en} ${p.sq} ${p.tags}`).split(/[^a-z0-9]+/); return words.filter(w => h.some(t => t.startsWith(w))).length; };
     // Only the best-scoring items: offering the plain croissant next to the chocolate one invites the model to pick wrong.
     const scored = catalog.products.map(p => [score(p), p]);
     const best = Math.max(...scored.map(([s]) => s));
