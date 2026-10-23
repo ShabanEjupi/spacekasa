@@ -51,17 +51,16 @@ const card = ([title, big, small]) => `<!doctype html><meta charset="utf-8"><sty
 
 const timeline = [];
 let phone;
-// Counts are taken when a segment ACTS. A segment that only waits (e.g. "turns Paid") compares against the last action,
-// because the change may already have happened while the previous segment ran.
+// When a segment ACTS, every element matching any "until" selector is marked as seen. A segment then waits for an
+// unmarked match: a count would miss a card that REPLACES another (a newer proposal, or Waiting → Paid), and a
+// wait-only segment compares against the last action because Paid may land while the previous segment ran.
 const sels = [...new Set(script.map(s => s.until).filter(Boolean))];
-let mark = {};
 for (const [i, seg] of script.entries()) {
   const start = now();
   const acts = seg.type || seg.click || seg.pay || seg.goto || seg.card;
   if (seg.card) await p.setContent(card(T[lang][seg.card]));
   if (seg.goto) { await p.goto(base); await p.mouse.move(mouse.x, mouse.y); await sleep(1.2); }
-  if (acts) for (const s of sels) mark[s] = await p.locator(s).count();
-  const before = mark[seg.until] ?? 0;
+  if (acts) await p.evaluate(ss => ss.forEach(s => document.querySelectorAll(s).forEach(e => { e.dataset.seen = 1; })), sels);
   let acted = start;
   const typed = lang === 'sq' ? seg.type_sq || seg.type : seg.type;
   if (typed) {
@@ -102,8 +101,8 @@ for (const [i, seg] of script.entries()) {
   }
   let done = acted;
   if (seg.until) {
-    // Wait until one MORE element matches than before the action.
-    await p.waitForFunction(([sel, n]) => document.querySelectorAll(sel).length > n, [seg.until, before], { timeout: 150000 });
+    await p.waitForFunction(sel => [...document.querySelectorAll(sel)].some(e => !e.dataset.seen), seg.until, { timeout: 150000 })
+      .catch(async e => { await p.screenshot({ path: `${dir}/seg${i}-fail.png` }); throw e; });
     done = now();
     await p.evaluate(() => document.querySelector('#chat')?.scrollTo({ top: 1e6, behavior: 'smooth' }));
   }
