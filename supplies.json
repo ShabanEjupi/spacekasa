@@ -1,0 +1,10 @@
+{
+  "supplier": { "id": "S-0042", "name": "Demo Dairy & Roastery", "email": "sb-supplier@spacecode.tech" },
+  "items": [
+    { "sku": "milk-1l", "en": "Milk, 1 l", "sq": "Qumësht, 1 l", "stock": 14, "reference": 0.9, "supplierOpen": 1.25, "supplierFloor": 0.82,
+      "uses": { "COF-MAC": 0.05, "COF-MCL": 0.08, "COF-CAP": 0.12, "COF-LAT": 0.2, "HOT-CHO": 0.2, "COF-ICE": 0.1 } },
+    { "sku": "beans-1kg", "en": "Espresso beans, 1 kg", "sq": "Kokrra espresso, 1 kg", "stock": 1, "reference": 14, "supplierOpen": 18.5, "supplierFloor": 12.9,
+      "uses": { "COF-ESP": 0.008, "COF-MAC": 0.008, "COF-MCL": 0.008, "COF-CAP": 0.008, "COF-LAT": 0.008, "COF-ICE": 0.016 } }
+  ],
+  "mandate": { "id": "M-DEMO", "agent": "procurement", "kind": "buy", "perOrder": 60, "perWeek": 120, "priceFactor": 1.1 }
+}

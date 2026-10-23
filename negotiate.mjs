@@ -16,7 +16,7 @@ export function negotiate(buyer, seller, T = 10) {
   if (qty <= 0) return { deal: null, log: [{ round: 0, from: 'seller', why: 'no stock' }] };
   const allowed = unit => check({ agent: 'procurement', kind: 'buy', supplier: buyer.supplier, lines: [{ sku: buyer.sku, qty, unit }], at: buyer.at },
     buyer.mandates, buyer.pub, buyer.history);
-  let last = { buyer: null, seller: null };
+  let last = { buyer: null, seller: null }, cap = null;
   for (let t = 0; t <= T; t++) {
     // Seller offers; the buyer accepts if it is no worse than what the buyer would offer next and the mandate allows it.
     const ask = up(Math.max(seller.floor, curve(seller.open, seller.floor, t, T, seller.beta)));
@@ -26,12 +26,13 @@ export function negotiate(buyer, seller, T = 10) {
     // Buyer counters with the most its curve allows this round, cut back to what the mandate allows.
     let bid = Math.min(mine, buyer.limit);
     while (bid > 0 && !allowed(bid).ok) bid = cents(bid - 0.01);
+    if (bid < mine) cap = allowed(mine).reasons.join('; ');               // the mandate, not the haggling, held the bid down
     if (bid <= 0) { log.push({ round: t, from: 'buyer', why: allowed(mine).reasons.join('; ') }); return { deal: null, log }; }
     log.push({ round: t, from: 'buyer', unit: bid });
     const next = up(Math.max(seller.floor, curve(seller.open, seller.floor, t + 1, T, seller.beta)));
     if (bid >= next) { log.push({ round: t, from: 'seller', unit: bid, ok: true }); return { deal: { unit: bid, qty, round: t }, log }; }
     last = { buyer: bid, seller: ask };
   }
-  log.push({ round: T, from: 'buyer', why: `no agreement: last ask ${last.seller}, last bid ${last.buyer}` });
+  log.push({ round: T, from: 'buyer', why: `no agreement: last ask ${last.seller}, last bid ${last.buyer}` + (cap ? ` (held down by ${cap})` : '') });
   return { deal: null, log };
 }
