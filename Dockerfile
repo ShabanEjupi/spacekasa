@@ -2,7 +2,7 @@ FROM node:22-slim
 # No npm install: the app has zero dependencies.
 WORKDIR /app
 # Explicit list, not `COPY . .`, so no .env or data file can ever land in the image.
-COPY server.mjs qr.mjs catalog.json ./
+COPY server.mjs qr.mjs audit.mjs mandate.mjs catalog.json ./
 COPY public ./public
 ENV NODE_ENV=production PORT=8080 DATA_DIR=/data
 EXPOSE 8080

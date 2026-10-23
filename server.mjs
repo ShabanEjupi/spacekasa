@@ -13,6 +13,7 @@
 
 import http from 'node:http';
 import fs from 'node:fs';
+import { append, intact, root, proof } from './audit.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { svg as qrSvg } from './qr.mjs';
@@ -39,10 +40,22 @@ fs.mkdirSync(DATA, { recursive: true });
 const LEDGER = path.join(DATA, 'ledger.json');
 let ledger = [];
 try { ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')); } catch {}
-function save() {
-  fs.writeFileSync(LEDGER + '.tmp', JSON.stringify(ledger, null, 1));
-  fs.renameSync(LEDGER + '.tmp', LEDGER);
+const writeJson = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 1)); fs.renameSync(f + '.tmp', f); };
+// Every change to a payment also goes into the audit chain (audit.mjs): hash-linked, with a Merkle root per day that
+// can be published and a proof per receipt. The chain records what PayPal and the cashier did, never what the model said.
+const AUDIT = path.join(DATA, 'audit.json');
+let chain = [];
+try { chain = JSON.parse(fs.readFileSync(AUDIT, 'utf8')); } catch {}
+const lastAudit = new Map(chain.map(c => [c.data.ref, c.data]));
+function save(e) {
+  writeJson(LEDGER, ledger);
+  if (!e) return;
+  const fact = { ref: e.ref, kind: e.kind, status: e.status, total: e.total, refunded: e.refunded || 0, paypal_id: e.paypal_id, at: new Date().toISOString() };
+  const was = lastAudit.get(e.ref);
+  if (was && was.status === fact.status && was.refunded === fact.refunded) return;
+  append(chain, fact); lastAudit.set(e.ref, fact); writeJson(AUDIT, chain);
 }
+const auditDay = day => chain.filter(c => c.data.at.startsWith(day)).map(c => c.data);
 // Each browser is its own till (a random id it keeps), so demo visitors never see each other's customers.
 const mine = till => ledger.filter(e => (e.till || 'public') === till);
 const findRef = (ref, till) => ledger.find(e => e.ref === String(ref).toUpperCase().trim() && (!till || (e.till || 'public') === till));
@@ -123,7 +136,7 @@ async function createQr(data) {
   const url = order.links.find(l => l.rel === 'payer-action' || l.rel === 'approve')?.href;
   const e = { ref, kind: 'qr', paypal_id: order.id, status: 'awaiting_payment', lines, total, customer, url, created: new Date().toISOString() };
   e.till = data.till;
-  ledger.push(e); save();
+  ledger.push(e); save(e);
   return e;
 }
 
@@ -144,7 +157,7 @@ async function createInvoice(data) {
   const url = full.detail?.metadata?.recipient_view_url;
   const e = { ref, kind: 'invoice', paypal_id: inv.id, status: 'awaiting_payment', lines, total, customer, email, url, created: new Date().toISOString() };
   e.till = data.till;
-  ledger.push(e); save();
+  ledger.push(e); save(e);
   return e;
 }
 
@@ -158,22 +171,22 @@ async function refresh(e) {
       catch (err) {
         // PayPal declined the capture (e.g. COMPLIANCE_VIOLATION, INSTRUMENT_DECLINED): final, stop waiting.
         if (err.status !== 422) throw err;
-        Object.assign(e, { status: 'failed', error: err.message.replace(/^PayPal: /, '') }); save();
+        Object.assign(e, { status: 'failed', error: err.message.replace(/^PayPal: /, '') }); save(e);
         return e;
       }
     }
     if (o.status === 'COMPLETED') {
       const cap = o.purchase_units?.[0]?.payments?.captures?.[0];
       Object.assign(e, { status: 'paid', capture_id: cap?.id, paid_at: new Date().toISOString(), payer: o.payer?.name?.given_name });
-      save();
+      save(e);
     }
   } else if (e.kind === 'invoice') {
     const inv = await pp('GET', `/v2/invoicing/invoices/${e.paypal_id}`);
     if (['PAID', 'MARKED_AS_PAID'].includes(inv.status)) {
       Object.assign(e, { status: 'paid', paid_at: new Date().toISOString(),
                          capture_id: inv.payments?.transactions?.[0]?.payment_id });
-      save();
-    } else if (inv.status === 'CANCELLED') { e.status = 'cancelled'; save(); }
+      save(e);
+    } else if (inv.status === 'CANCELLED') { e.status = 'cancelled'; save(e); }
   }
   return e;
 }
@@ -195,7 +208,7 @@ async function execute({ kind, data }) {
     if (e.kind === 'invoice') await pp('POST', `/v2/invoicing/invoices/${e.paypal_id}/cancel`, { send_to_recipient: false, send_to_invoicer: false });
     e.status = 'cancelled';
   }
-  save();
+  save(e);
   return e;
 }
 
@@ -395,6 +408,20 @@ http.createServer(async (req, res) => {
       return send(res, 200, fs.readFileSync(path.join(DIR, 'public', f)), type);
     }
     if (u.pathname === '/health') return send(res, 200, { ok: true, payments: ledger.length });
+    // Published audit roots, and a receipt's proofs against them (amounts and states only, no customer data).
+    if (req.method === 'GET' && u.pathname === '/api/audit') {
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(u.searchParams.get('day') || '') ? u.searchParams.get('day') : new Date().toISOString().slice(0, 10);
+      const d = auditDay(day);
+      return send(res, 200, { day, entries: d.length, root: root(d), chain: chain.length, head: chain.at(-1)?.hash ?? null, intact: intact(chain) });
+    }
+    if (req.method === 'GET' && u.pathname.startsWith('/api/receipt/')) {
+      const ref = u.pathname.slice(13).toUpperCase();
+      const facts = chain.filter(c => c.data.ref === ref).map(c => {
+        const day = c.data.at.slice(0, 10), d = auditDay(day), i = d.indexOf(c.data);
+        return { fact: c.data, day, proof: proof(d, i), root: root(d) };
+      });
+      return facts.length ? send(res, 200, { ref, facts }) : send(res, 404, { error: 'Not found' });
+    }
     if (req.method === 'GET' && u.pathname === '/api/catalog') return send(res, 200, catalog);
     if (req.method === 'GET' && u.pathname === '/paid') {
       const e = findRef(u.searchParams.get('ref') || '');

@@ -6,6 +6,7 @@ SRC=/mnt/data/workspace/spacekasa
 DST=/home/opc/apps/spacekasa
 node_check() { sudo docker run --rm -v "$SRC":/s:ro node:22-slim node --check /s/server.mjs && sudo docker run --rm -v "$SRC":/s:ro node:22-slim node --check /s/public/app.js; }
 node_check
+sudo docker run --rm -v "$SRC":/s:ro -w /s node:22-slim sh -c "for t in test/*.test.mjs; do node \$t >/dev/null || { echo FAIL \$t; exit 1; }; done"
 mkdir -p "$DST"; sudo mkdir -p /mnt/data/spacekasa
 sudo chown 1000:1000 /mnt/data/spacekasa
 rsync -a --exclude .git --exclude .env --exclude data "$SRC"/ "$DST"/
