@@ -4,7 +4,7 @@
 
 **Built with:** PayPal Orders v2, PayPal Invoicing v2, PayPal Payments v2 (refunds), PayPal Payouts, WebCrypto Ed25519, SHA-256 Merkle trees, gpt-oss-120b (OpenAI-compatible tool calling), Node.js 22 with no dependencies, Web Speech API, Docker, Cloudflare Tunnel.
 
-**Try it:** https://kasa.spacecode.tech (sandbox) · **Code:** https://git.spacecode.tech/shaban/spacekasa (MIT) · **Video:** https://youtu.be/Tkkn3lPCKdg
+**Try it:** https://kasa.spacecode.tech (sandbox) · **Code:** https://git.spacecode.tech/shaban/spacekasa (MIT) · **Video:** https://youtu.be/kqLQSMPRVic
 
 ## Inspiration
 Small cafés and shops in Kosovo run on cash, a paper notebook of who owes what, and a phone. A card terminal costs money every month, and invoicing software expects a back office the shop doesn't have. Yet the cashier already says everything the system needs: "two macchiatos and a water", "invoice the office next door for twelve cappuccinos", "give her the money back, the croissant was cold".
