@@ -11,7 +11,7 @@ const T = {
         awaiting_payment: 'Waiting for payment', paid: 'Paid', refunded: 'Refunded', cancelled: 'Cancelled', failed: 'Declined by PayPal',
         paid_s: 'paid', awaiting_s: 'waiting', none: 'No payments yet.', thinking: 'Thinking…', err: 'Something went wrong',
         listening: 'Listening…', for: 'for',
-        ex: ['Two macchiatos and a small water, she pays now', 'Invoice Arben for a phone screen repair, arben@example.com', 'How much did we take today?'] },
+        ex: ['Two macchiatos and a small water, she pays now', 'Invoice Blue Desk office for 12 cappuccinos, office@example.com', 'How much did we take today?'] },
   sq: { tagline: 'fol me arkën', sandbox: 'PayPal sandbox', h1: 'Thuaj çka po blen klienti.',
         intro: 'SpaceKasa i gjen artikujt, ua merr çmimin nga katalogu dhe përgatit QR ose faturë PayPal. Çdo pagesë e konfirmon ti.',
         send: 'Dërgo', placeholder: 'p.sh. dy makiato dhe një ujë, me QR', today: 'Sot', confirm: 'Konfirmo', dismiss: 'Hiqe',
@@ -20,7 +20,7 @@ const T = {
         awaiting_payment: 'Në pritje të pagesës', paid: 'U pagua', refunded: 'U kthye', cancelled: 'U anulua', failed: 'PayPal e refuzoi',
         paid_s: 'paguar', awaiting_s: 'në pritje', none: 'Ende asnjë pagesë.', thinking: 'Po mendoj…', err: 'Diçka shkoi keq',
         listening: 'Po dëgjoj…', for: 'për',
-        ex: ['Dy makiato dhe një ujë i vogël, paguan tani', 'Faturo Arbenin për ndërrim ekrani, arben@example.com', 'Sa kemi xhiru sot?'] },
+        ex: ['Dy makiato dhe një ujë i vogël, paguan tani', 'Faturo zyrën Blue Desk për 12 kapuçino, office@example.com', 'Sa kemi xhiru sot?'] },
 };
 let lang = 'en';
 try { lang = localStorage.getItem('kasa-lang') || ((navigator.language || '').startsWith('sq') ? 'sq' : 'en'); } catch {}
