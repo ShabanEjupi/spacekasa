@@ -17,6 +17,8 @@ import { append, intact, root, proof } from './audit.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { svg as qrSvg } from './qr.mjs';
+import { signMandate } from './mandate.mjs';
+import { run as procure, simulatedSales } from './procure.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
@@ -59,6 +61,43 @@ const auditDay = day => chain.filter(c => c.data.at.startsWith(day)).map(c => c.
 // Each browser is its own till (a random id it keeps), so demo visitors never see each other's customers.
 const mine = till => ledger.filter(e => (e.till || 'public') === till);
 const findRef = (ref, till) => ledger.find(e => e.ref === String(ref).toUpperCase().trim() && (!till || (e.till || 'public') === till));
+
+// ── Procurement agent (procure.mjs): spends on its own, only inside a signed mandate ──
+// The owner key lives in the data folder; the mandate is signed with it at start. (Next: signed in the owner's browser.)
+const supplies = JSON.parse(fs.readFileSync(path.join(DIR, 'supplies.json'), 'utf8'));
+const KEYF = path.join(DATA, 'owner-key.json');
+let owner;
+try { const k = JSON.parse(fs.readFileSync(KEYF, 'utf8')); owner = { pub: k.pub, priv: crypto.createPrivateKey(k.priv) }; }
+catch { const p = crypto.generateKeyPairSync('ed25519'); owner = { pub: p.publicKey.export({ type: 'spki', format: 'pem' }), priv: p.privateKey };
+        writeJson(KEYF, { pub: owner.pub, priv: p.privateKey.export({ type: 'pkcs8', format: 'pem' }) }); }
+const MANDATE = signMandate({ ...supplies.mandate, skus: supplies.items.map(i => i.sku), suppliers: [supplies.supplier.id],
+  reference: Object.fromEntries(supplies.items.map(i => [i.sku, i.reference])), from: '2026-10-01T00:00:00Z', until: '2026-12-31T00:00:00Z' }, owner.priv);
+const PROC = path.join(DATA, 'procure.json');
+let proc = { history: [], stock: {} };
+try { proc = JSON.parse(fs.readFileSync(PROC, 'utf8')); } catch {}
+let procuring = false;
+async function procureNow() {
+  if (procuring) throw Object.assign(new Error('A procurement run is already going'), { status: 409 });
+  procuring = true;
+  try {
+    const now = Date.now(), items = supplies.items.map(i => ({ ...i, stock: proc.stock[i.sku] ?? i.stock }));
+    // Real paid sales from the till, on top of eight simulated weeks (labelled) so the forecast has history to learn from.
+    const sales = [...simulatedSales(now), ...ledger.filter(e => e.status === 'paid').map(e => ({ at: e.paid_at || e.created, lines: e.lines }))];
+    const trace = await procure({ supplies: { ...supplies, items }, sales, mandates: [MANDATE], pub: owner.pub, history: proc.history, now,
+      pay: async (item, deal) => {
+        const value = (Math.round(deal.unit * deal.qty * 100) / 100).toFixed(2);
+        const r = await pp('POST', '/v1/payments/payouts', { sender_batch_header: { sender_batch_id: `SK-${crypto.randomUUID()}`, email_subject: `Order: ${deal.qty} × ${item.en}` },
+          items: [{ recipient_type: 'EMAIL', receiver: supplies.supplier.email, amount: { value, currency: CUR }, note: `${deal.qty} × ${item.en} at ${deal.unit}` }] });
+        const id = r.batch_header.payout_batch_id;
+        append(chain, { ref: id, kind: 'payout', status: 'sent', total: cents(value), refunded: 0, paypal_id: id, mandate: MANDATE.id, at: new Date().toISOString() });
+        writeJson(AUDIT, chain);
+        return { id };
+      } });
+    for (const i of items) proc.stock[i.sku] = i.stock;
+    writeJson(PROC, proc);
+    return { mandate: (({ sig, ...m }) => m)(MANDATE), trace };
+  } finally { procuring = false; }
+}
 
 // Proposals waiting for a human tap. Short-lived on purpose.
 const pending = new Map();
@@ -409,6 +448,8 @@ http.createServer(async (req, res) => {
     }
     if (u.pathname === '/health') return send(res, 200, { ok: true, payments: ledger.length });
     // Published audit roots, and a receipt's proofs against them (amounts and states only, no customer data).
+    if (req.method === 'GET' && u.pathname === '/api/procure')
+      return send(res, 200, { mandate: (({ sig, ...m }) => m)(MANDATE), stock: supplies.items.map(i => ({ sku: i.sku, en: i.en, sq: i.sq, stock: proc.stock[i.sku] ?? i.stock })), history: proc.history.slice(-20).reverse() });
     if (req.method === 'GET' && u.pathname === '/api/audit') {
       const day = /^\d{4}-\d{2}-\d{2}$/.test(u.searchParams.get('day') || '') ? u.searchParams.get('day') : new Date().toISOString().slice(0, 10);
       const d = auditDay(day);
@@ -446,6 +487,7 @@ http.createServer(async (req, res) => {
       return send(res, 200, card(await execute(p)));
     }
     if (u.pathname === '/api/dismiss') { pending.delete(String(b.id)); return send(res, 200, { ok: true }); }
+    if (u.pathname === '/api/procure') return send(res, 200, await procureNow());
     send(res, 404, { error: 'Not found' });
   } catch (err) {
     console.error(new Date().toISOString(), u.pathname, err.message);
