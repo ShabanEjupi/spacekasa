@@ -4,7 +4,7 @@
 
 **Built with:** PayPal Orders v2, PayPal Invoicing v2, PayPal Payments v2 (refunds), gpt-oss-120b (OpenAI-compatible tool calling), Node.js 22 with no dependencies, Web Speech API, Docker, Cloudflare Tunnel.
 
-**Try it:** https://kasa.spacecode.tech (sandbox) · **Code:** https://git.spacecode.tech/shaban/spacekasa (MIT)
+**Try it:** https://kasa.spacecode.tech (sandbox) · **Code:** https://git.spacecode.tech/shaban/spacekasa (MIT) · **Video:** https://youtu.be/Tkkn3lPCKdg
 
 ## Inspiration
 Small cafés and shops in Kosovo run on cash, a paper notebook of who owes what, and a phone. A card terminal costs money every month, and invoicing software expects a back office the shop doesn't have. Yet the cashier already says everything the system needs: "two macchiatos and a water", "invoice the office next door for twelve cappuccinos", "give her the money back, the croissant was cold".
@@ -29,6 +29,8 @@ A single Node 22 server with no npm dependencies. The model gets seven tools: `f
 ## Challenges
 - Small models drift between languages and sometimes propose twice (a partial basket, then the corrected one). We pin the reply language on each turn and let a newer proposal replace the earlier one.
 - PayPal sandbox compliance rules depend on the merchant's country: captures failed with COMPLIANCE_VIOLATION until we moved to a US sandbox merchant.
+- Cashiers describe orders, not references: "refund the two macchiatos". The model first asked for the K-XXXXXX code; now it looks the payment up with `list_payments` and matches it by items, customer or amount.
+- The model provider sometimes rejects a tool call whose arguments miss the schema (a number where a note was expected). Optional fields accept null, and one rejected call is retried once.
 
 ## What we learned
 Agentic commerce works when the language model handles the words, and the system holds the money and the prices. Splitting the work this way made the language-model part *more* useful, because we could let it act freely.
