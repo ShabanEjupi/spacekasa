@@ -332,7 +332,7 @@ async function chat(history, lang, till) {
   // Small models drift into the wrong language; tell them which one, per turn.
   const last = msgs.at(-1)?.content || '';
   const sq = /[ëç]|\b(dhe|një|nje|për|per|sa|faturo|paguan|kafe|ujë|uje)\b/i.test(last) || (lang === 'sq' && !/\b(the|and|for|please|invoice)\b/i.test(last));
-  msgs.push({ role: 'system', content: `Reply in ${sq ? 'Albanian' : 'English'}. Plain text, no markdown.` });
+  msgs.push({ role: 'system', content: `Reply in ${sq ? 'Albanian' : 'English'}. Plain text, no markdown.${sq ? ' On screen the Confirm button reads "Konfirmo"; call it that.' : ''}` });
   const cards = [];
   const trace = [];
   const seen = new Set();

@@ -7,7 +7,7 @@ const b = await chromium.launch();
 let fail = 0;
 for (const [label, vp, lang, said] of [
   ['desktop', { width: 1280, height: 860 }, 'en', 'Two macchiatos and a small water, he pays now'],
-  ['phone', { width: 390, height: 844 }, 'sq', 'Dy ujë të mëdhenj dhe një bukë integrale, paguan tani me QR'],
+  ['phone', { width: 390, height: 844 }, 'sq', 'Dy kapuçino dhe një kroasan me çokollatë, paguan tani me QR'],
 ]) {
   const p = await b.newPage({ viewport: vp, locale: lang === 'sq' ? 'sq-AL' : 'en-US', colorScheme: label === 'phone' ? 'dark' : 'light' });
   const errors = [];
