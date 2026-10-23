@@ -75,7 +75,9 @@ for (const [i, seg] of script.entries()) {
     await buyer.click('#btnNext');
     await buyer.locator('#password').pressSequentially(process.env.BUYER_PASS, { delay: 30, timeout: 30000 });
     await buyer.click('#btnLogin');
-    await buyer.locator('#payment-submit-btn, button:has-text("Complete Purchase")').first().click({ timeout: 60000 });
+    // Same button variants as test/pay.mjs: the mobile sandbox page labels it differently. A screenshot tells why when none shows.
+    await buyer.locator('#payment-submit-btn, button:has-text("Complete Purchase"), button:has-text("Pay"), button:has-text("Continue to Review Order")').first()
+      .click({ timeout: 60000 }).catch(async e => { await buyer.screenshot({ path: `${dir}/pay-fail.png` }); throw e; });
     await buyer.waitForURL(/\/paid\?/, { timeout: 60000 });
     await buyer.waitForTimeout(1500);
     const pEnd = now();
