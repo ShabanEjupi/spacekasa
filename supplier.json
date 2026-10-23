@@ -1,0 +1,7 @@
+{
+  "supplier": { "id": "S-0042", "name": "Demo Dairy & Roastery" },
+  "items": [
+    { "sku": "milk-1l", "en": "Milk, 1 l", "sq": "Qumësht, 1 l", "open": 1.25, "floor": 0.82, "beta": 1.2, "stock": 1000 },
+    { "sku": "beans-1kg", "en": "Espresso beans, 1 kg", "sq": "Kokrra espresso, 1 kg", "open": 18.5, "floor": 12.9, "beta": 1.2, "stock": 1000 }
+  ]
+}

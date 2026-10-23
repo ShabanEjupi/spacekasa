@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>SpaceKasa Supplier</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="verify">
+<header>
+  <div class="brand"><span class="logo" aria-hidden="true"></span><b>SpaceKasa</b><small data-t="tag"></small></div>
+  <div class="tools"><span class="sandbox">PayPal sandbox</span><button id="lang" class="ghost" aria-label="Language">SQ</button></div>
+</header>
+<main class="receipt">
+  <section class="card wide">
+    <h1 id="name"></h1>
+    <p class="dim" data-t="about"></p>
+    <p><span data-t="key"></span> <code class="fp" id="fp"></code></p>
+    <h2 data-t="deals"></h2>
+    <ol id="deals" class="plain"></ol>
+    <h2 data-t="witnessed"></h2>
+    <ol id="wit" class="plain"></ol>
+  </section>
+</main>
+<script src="/sk.js"></script>
+<script>
+'use strict';
+const T = {
+  en: { tag: 'supplier agent', about: 'A separate server: the supplier’s sales agent. It haggles with cafés’ procurement agents in signed alternating offers, and countersigns their books only after checking they were only ever appended to. Its floor prices live only here.',
+        key: 'Signing key', deals: 'Latest negotiations', witnessed: 'Books we countersign', none: 'Nothing yet.', rounds: 'messages', nodeal: 'no deal', entries: 'entries', verified: 'all our signatures verify in your browser' },
+  sq: { tag: 'agjenti i furnitorit', about: 'Server më vete: agjenti i shitjes së furnitorit. Bën pazar me agjentët e furnizimit të kafeneve me oferta të alternuara të nënshkruara, dhe ua kundërnënshkruan librat vetëm pasi verifikon se atyre vetëm u është shtuar. Çmimet minimale rrinë vetëm këtu.',
+        key: 'Çelësi i nënshkrimit', deals: 'Pazaret e fundit', witnessed: 'Librat që i kundërnënshkruajmë', none: 'Ende asgjë.', rounds: 'mesazhe', nodeal: 'pa marrëveshje', entries: 'hyrje', verified: 'të gjitha nënshkrimet tona verifikohen te shfletuesi yt' },
+};
+let lang = (navigator.language || '').startsWith('sq') ? 'sq' : 'en', data;
+const t = k => T[lang][k], $ = s => document.querySelector(s);
+const li = (a, b) => { const l = document.createElement('li'); l.textContent = a; if (b) { const s = document.createElement('small'); s.textContent = b; l.append(s); } return l; };
+async function draw() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-t]').forEach(e => { e.textContent = t(e.dataset.t); });
+  $('#lang').textContent = lang === 'en' ? 'SQ' : 'EN';
+  if (!data) return;
+  $('#name').textContent = `${data.supplier.name} · ${data.supplier.id}`;
+  $('#fp').textContent = await SK.fingerprint(data.key);
+  const d = data.deals.map(x => li(`${new Date(x.at).toLocaleString(lang === 'sq' ? 'sq-AL' : 'en-GB')} · ${x.sku} · ${x.deal != null ? `${x.qty} × ${x.deal.toFixed(2)} €` : t('nodeal')}`,
+    x.offers.map(o => o.ask ?? o.accept).filter(v => v != null).map(v => v.toFixed(2)).join(' → ') + ` · ${x.rounds} ${t('rounds')}`));
+  $('#deals').replaceChildren(...(d.length ? d : [li(t('none'))]));
+  const w = data.witnessed.map(x => li(`${x.n} ${t('entries')} · ${new Date(x.at).toLocaleString(lang === 'sq' ? 'sq-AL' : 'en-GB')}`, `root ${x.root?.slice(0, 32)}…`));
+  $('#wit').replaceChildren(...(w.length ? w : [li(t('none'))]));
+}
+$('#lang').onclick = () => { lang = lang === 'en' ? 'sq' : 'en'; draw(); };
+fetch('/api/deals').then(r => r.json()).then(j => { data = j; draw(); });
+draw();
+</script>
+</body>
+</html>

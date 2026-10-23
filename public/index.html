@@ -13,6 +13,7 @@
   <div class="brand"><span class="logo" aria-hidden="true"></span><b>SpaceKasa</b><small data-t="tagline"></small></div>
   <div class="tools">
     <span class="sandbox" data-t="sandbox"></span>
+    <button id="agentBtn" class="ghost">Agent</button>
     <button id="lang" class="ghost" aria-label="Language">SQ</button>
   </div>
 </header>
@@ -35,6 +36,9 @@
   <input id="q" maxlength="500" enterkeyhint="send">
   <button id="go" class="primary" type="submit" data-t="send"></button>
 </form>
+<dialog id="agent"><div class="dhead"><h2></h2><button class="ghost close" type="button"></button></div><div class="body"></div></dialog>
+<script src="/sk.js"></script>
 <script src="/app.js"></script>
+<script src="/agent.js"></script>
 </body>
 </html>

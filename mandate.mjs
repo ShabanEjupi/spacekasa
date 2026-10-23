@@ -2,9 +2,10 @@
 // The verifier is deterministic and has no model in it; the agent's word counts for nothing, only the mandate does.
 import { generateKeyPairSync, sign, verify as edVerify, createPublicKey } from 'node:crypto';
 
-// Canonical JSON: keys sorted at every level, so the signed bytes do not depend on key order.
-export const canonical = v => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
-  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`
+// Canonical JSON: keys sorted at every level, so the signed bytes do not depend on key order. Undefined fields are
+// left out, exactly as JSON leaves them out, so an object hashes the same before and after a trip through JSON.
+export const canonical = v => Array.isArray(v) ? `[${v.map(x => x === undefined ? 'null' : canonical(x)).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`
   : JSON.stringify(v);
 
 export const keys = () => {

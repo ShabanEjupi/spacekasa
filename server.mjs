@@ -13,7 +13,9 @@
 
 import http from 'node:http';
 import fs from 'node:fs';
-import { append, intact, root, proof } from './audit.mjs';
+import { append, intact, root, proof, leaf } from './audit.mjs';
+import { keyFile, der, pemOf, signObj, verifyObj, remoteSeller } from './a2a.mjs';
+import { localSeller } from './negotiate.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { svg as qrSvg } from './qr.mjs';
@@ -61,42 +63,114 @@ const auditDay = day => chain.filter(c => c.data.at.startsWith(day)).map(c => c.
 // Each browser is its own till (a random id it keeps), so demo visitors never see each other's customers.
 const mine = till => ledger.filter(e => (e.till || 'public') === till);
 const findRef = (ref, till) => ledger.find(e => e.ref === String(ref).toUpperCase().trim() && (!till || (e.till || 'public') === till));
-
 // ── Procurement agent (procure.mjs): spends on its own, only inside a signed mandate ──
-// The owner key lives in the data folder; the mandate is signed with it at start. (Next: signed in the owner's browser.)
+// Each till may have an owner: a key made in the owner's browser (WebCrypto, never leaves it), registered on first
+// use. The owner signs mandates and every request to run the agent. A till without an owner runs the sandbox demo
+// under the server's own demo mandate; with real PayPal money nothing runs without an owner's signature.
 const supplies = JSON.parse(fs.readFileSync(path.join(DIR, 'supplies.json'), 'utf8'));
-const KEYF = path.join(DATA, 'owner-key.json');
-let owner;
-try { const k = JSON.parse(fs.readFileSync(KEYF, 'utf8')); owner = { pub: k.pub, priv: crypto.createPrivateKey(k.priv) }; }
-catch { const p = crypto.generateKeyPairSync('ed25519'); owner = { pub: p.publicKey.export({ type: 'spki', format: 'pem' }), priv: p.privateKey };
-        writeJson(KEYF, { pub: owner.pub, priv: p.privateKey.export({ type: 'pkcs8', format: 'pem' }) }); }
-const MANDATE = signMandate({ ...supplies.mandate, skus: supplies.items.map(i => i.sku), suppliers: [supplies.supplier.id],
+const owner = keyFile(path.join(DATA, 'owner-key.json'), writeJson);        // signs the demo mandate only
+const tillKey = keyFile(path.join(DATA, 'till-key.json'), writeJson);       // signs our offers and our tree heads
+const DEMO = signMandate({ ...supplies.mandate, skus: supplies.items.map(i => i.sku), suppliers: [supplies.supplier.id],
   reference: Object.fromEntries(supplies.items.map(i => [i.sku, i.reference])), from: '2026-10-01T00:00:00Z', until: '2026-12-31T00:00:00Z' }, owner.priv);
+const OWNERS = path.join(DATA, 'owners.json');
+let owners = {};
+try { owners = JSON.parse(fs.readFileSync(OWNERS, 'utf8')); } catch {}
 const PROC = path.join(DATA, 'procure.json');
-let proc = { history: [], stock: {} };
-try { proc = JSON.parse(fs.readFileSync(PROC, 'utf8')); } catch {}
+let procs = {};
+try { procs = JSON.parse(fs.readFileSync(PROC, 'utf8')); if (procs.history) procs = { public: procs }; } catch {}
+const procOf = till => (procs[till] ||= { history: [], stock: {} });
+const unsig = ({ sig, ...m }) => m;
+const bad = msg => Object.assign(new Error(msg), { status: 400 });
+
+// A mandate from a browser: signed by this till's owner key, and inside what the sandbox demo allows at all.
+function acceptMandate(till, m) {
+  const o = owners[till];
+  if (!o) throw bad('Register an owner key first');
+  const num = (x, lo, hi) => typeof x === 'number' && Number.isFinite(x) && x >= lo && x <= hi;
+  if (!m || typeof m !== 'object' || !/^M-[A-Z0-9-]{1,24}$/.test(m.id || '') || m.agent !== 'procurement' || m.kind !== 'buy') throw bad('Not a procurement mandate');
+  if (!num(m.perOrder, 1, 500) || !num(m.perWeek, 1, 2000) || !num(m.priceFactor, 1, 1.5) || m.perOrder > m.perWeek) throw bad('Limits out of range');
+  if (!Array.isArray(m.skus) || !m.skus.every(s => supplies.items.some(i => i.sku === s)) || JSON.stringify(m.suppliers) !== JSON.stringify([supplies.supplier.id])) throw bad('Unknown supplies or supplier');
+  if (!m.reference || !m.skus.every(s => num(m.reference[s], 0.01, 1000))) throw bad('Every supply needs a signed reference price');
+  const from = Date.parse(m.from), until = Date.parse(m.until);
+  if (!(from < until && until - from <= 400 * 864e5)) throw bad('Valid for at most about a year');
+  if (!checkSig(m, o.key)) throw bad('Signature does not verify against this till\'s owner key');
+  o.mandate = m; writeJson(OWNERS, owners);
+}
+const checkSig = (m, key) => verifyObj(unsig(m), m.sig, pemOf(key));
+// A request to run the agent, signed by the owner: { op: 'procure', till, at }, fresh and never replayed.
+function ownerSaid(till, b) {
+  const o = owners[till], at = Date.parse(b.at);
+  if (!o) return false;
+  if (!(Math.abs(Date.now() - at) < 120e3) || at <= (o.last || 0)) throw bad('Stale or replayed request');
+  if (!verifyObj({ op: 'procure', till, at: b.at }, b.sig, pemOf(o.key))) throw bad('Owner signature does not verify');
+  o.last = at; writeJson(OWNERS, owners);
+  return true;
+}
+
+// The supplier is another server. Its key is pinned on first contact; an offer signed by any other key is refused.
+const SUPPLIER_URL = (process.env.SUPPLIER_URL || '').replace(/\/$/, '');
+const PIN = path.join(DATA, 'supplier-pin.json');
+async function supplierKey() {
+  try { return JSON.parse(fs.readFileSync(PIN, 'utf8')).key; } catch {}
+  const j = await (await fetch(`${SUPPLIER_URL}/a2a/key`, { signal: AbortSignal.timeout(10e3) })).json();
+  if (j.id !== supplies.supplier.id) throw new Error(`supplier says it is ${j.id}`);
+  writeJson(PIN, { id: j.id, key: j.key, pinned: new Date().toISOString() });
+  return j.key;
+}
+const localDesk = SUPPLIER_URL ? null : JSON.parse(fs.readFileSync(path.join(DIR, 'supplier.json'), 'utf8'));
+
 let procuring = false;
-async function procureNow() {
+async function procureNow(till, signed) {
   if (procuring) throw Object.assign(new Error('A procurement run is already going'), { status: 409 });
   procuring = true;
   try {
-    const now = Date.now(), items = supplies.items.map(i => ({ ...i, stock: proc.stock[i.sku] ?? i.stock }));
+    const p = procOf(till), mandate = signed && owners[till].mandate ? owners[till].mandate : DEMO;
+    const pub = mandate === DEMO ? owner.pub : pemOf(owners[till].key);
+    const now = Date.now(), items = supplies.items.map(i => ({ ...i, stock: p.stock[i.sku] ?? i.stock }));
     // Real paid sales from the till, on top of eight simulated weeks (labelled) so the forecast has history to learn from.
-    const sales = [...simulatedSales(now), ...ledger.filter(e => e.status === 'paid').map(e => ({ at: e.paid_at || e.created, lines: e.lines }))];
-    const trace = await procure({ supplies: { ...supplies, items }, sales, mandates: [MANDATE], pub: owner.pub, history: proc.history, now,
-      pay: async (item, deal) => {
+    const sales = [...simulatedSales(now), ...mine(till).filter(e => e.status === 'paid').map(e => ({ at: e.paid_at || e.created, lines: e.lines }))];
+    const sKey = SUPPLIER_URL ? pemOf(await supplierKey()) : null;
+    const seller = item => SUPPLIER_URL ? remoteSeller(SUPPLIER_URL, sKey, { id: BASE_URL, ...tillKey })
+      : localSeller(localDesk.items.find(i => i.sku === item.sku));
+    const trace = await procure({ supplies: { ...supplies, items }, sales, mandates: [mandate], pub, history: p.history, now, seller,
+      pay: async (item, deal, contract) => {
         const value = (Math.round(deal.unit * deal.qty * 100) / 100).toFixed(2);
         const r = await pp('POST', '/v1/payments/payouts', { sender_batch_header: { sender_batch_id: `SK-${crypto.randomUUID()}`, email_subject: `Order: ${deal.qty} × ${item.en}` },
           items: [{ recipient_type: 'EMAIL', receiver: supplies.supplier.email, amount: { value, currency: CUR }, note: `${deal.qty} × ${item.en} at ${deal.unit}` }] });
         const id = r.batch_header.payout_batch_id;
-        append(chain, { ref: id, kind: 'payout', status: 'sent', total: cents(value), refunded: 0, paypal_id: id, mandate: MANDATE.id, at: new Date().toISOString() });
+        append(chain, { ref: id, kind: 'payout', status: 'sent', total: cents(value), refunded: 0, paypal_id: id, mandate: mandate.id, contract, at: new Date().toISOString() });
         writeJson(AUDIT, chain);
         return { id };
       } });
-    for (const i of items) proc.stock[i.sku] = i.stock;
-    writeJson(PROC, proc);
-    return { mandate: (({ sig, ...m }) => m)(MANDATE), trace };
+    for (const i of items) p.stock[i.sku] = i.stock;
+    writeJson(PROC, procs);
+    cosign().catch(err => console.error('witness:', err.message));
+    return { mandate: unsig(mandate), owner: mandate !== DEMO, supplierKey: sKey ? der(sKey) : null, trace };
   } finally { procuring = false; }
+}
+
+// ── Tree heads: the whole chain's Merkle root, signed by us and countersigned by the supplier as witness ──
+const WIT = path.join(DATA, 'witnessed.json');
+let witnessed = null;                                 // { head, sig, cosig, witnessKey }
+try { witnessed = JSON.parse(fs.readFileSync(WIT, 'utf8')); } catch {}
+let cosigning = null, lastTry = 0;
+function cosign() {
+  if (!SUPPLIER_URL || witnessed?.head.n === chain.length || !chain.length) return Promise.resolve(witnessed);
+  if (cosigning) return cosigning;
+  if (Date.now() - lastTry < 5e3) return Promise.resolve(witnessed);
+  lastTry = Date.now();
+  const n = chain.length, head = { log: BASE_URL, n, head: chain[n - 1].hash, root: root(chain.slice(0, n).map(c => c.data)), at: new Date().toISOString() };
+  const ask = from => fetch(`${SUPPLIER_URL}/a2a/witness`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(15e3),
+    body: JSON.stringify({ head, sig: signObj(head, tillKey.priv), key: der(tillKey.pub), entries: chain.slice(from, n) }) });
+  cosigning = (async () => {
+    let r = await ask(witnessed?.head.n ?? 0), j = await r.json();
+    if (r.status === 409 && Number.isInteger(j.need)) { r = await ask(j.need); j = await r.json(); }
+    if (!r.ok) throw new Error(j.error || r.status);
+    witnessed = { head, sig: signObj(head, tillKey.priv), cosig: j.cosig, witnessKey: j.key };
+    writeJson(WIT, witnessed);
+    return witnessed;
+  })().finally(() => { cosigning = null; });
+  return cosigning;
 }
 
 // Proposals waiting for a human tap. Short-lived on purpose.
@@ -350,7 +424,10 @@ async function runTool(name, a, cards, seen, till) {
 
 const card = e => ({ ref: e.ref, method: e.kind, status: e.status, error: e.error, total: money(e.total), currency: CUR, customer: e.customer,
   email: e.email, url: e.url, lines: e.lines, created: e.created, refunded: e.refunded ? money(e.refunded) : undefined,
-  qr: e.status === 'awaiting_payment' && e.url ? qrSvg(e.url, { madhesia: 240 }) : undefined });
+  qr: e.status === 'awaiting_payment' && e.url ? qrSvg(e.url, { madhesia: 240 }) : undefined, receipt: receiptUrl(e) });
+// The receipt link pins the fact's leaf hash in the URL fragment (never sent to the server): if the books are ever
+// edited, the fact the server serves no longer hashes to what the customer's phone holds.
+const receiptUrl = e => lastAudit.has(e.ref) && ['paid', 'refunded'].includes(e.status) ? `/v/${e.ref}#${leaf(lastAudit.get(e.ref)).slice(0, 16)}` : undefined;
 
 const SYSTEM = `You are SpaceKasa, the till assistant of "${catalog.shop}", a small café in Kosovo. The user IS the cashier; they talk to you, often in Albanian, sometimes English; always answer in the language of their last message, briefly (1–3 sentences), like a helpful colleague.
 You take payments through PayPal by calling tools:
@@ -432,24 +509,34 @@ function paidPage(e, cancelled) {
   return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>SpaceKasa</title>
 <style>body{font:17px system-ui;background:#f4f1ea;color:#1d2a26;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px;box-sizing:border-box}
 main{background:#fff;border-radius:16px;padding:28px;max-width:360px;text-align:center}b{font-size:2em;display:block;margin:8px 0}@media(prefers-color-scheme:dark){body{background:#151b19;color:#e8e4da}main{background:#1f2724}}</style>
-<main><p>${esc(t[0])}<br><small>${esc(t[1])}</small></p>${e ? `<b>${money(e.total)} ${CUR}</b><p>${esc(e.ref)}</p>` : ''}<p><small>PayPal sandbox · SpaceKasa</small></p></main>`;
+<main><p>${esc(t[0])}<br><small>${esc(t[1])}</small></p>${e ? `<b>${money(e.total)} ${CUR}</b><p>${esc(e.ref)}</p>` : ''}${ok && receiptUrl(e) ? `<div style="background:#fff;border-radius:10px;padding:6px;width:fit-content;margin:8px auto">${qrSvg(BASE_URL + receiptUrl(e), { madhesia: 180 })}</div><p><a href="${esc(receiptUrl(e))}" style="color:inherit">Verify receipt · Verifiko kuponin</a></p>` : ''}<p><small>PayPal sandbox · SpaceKasa</small></p></main>`;
 }
 
-const STATIC = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+const STATIC = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'],
+  '/sk.js': ['sk.js', 'text/javascript'], '/agent.js': ['agent.js', 'text/javascript'], '/verify.js': ['verify.js', 'text/javascript'] };
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, BASE_URL);
   const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
   const till = /^[a-z0-9]{8,32}$/.test(req.headers['x-till'] || '') ? req.headers['x-till'] : 'public';
   try {
+    if (req.method === 'GET' && /^\/v\/[A-Z0-9-]{4,40}$/i.test(u.pathname)) return send(res, 200, fs.readFileSync(path.join(DIR, 'public', 'verify.html')), 'text/html; charset=utf-8');
     if (req.method === 'GET' && STATIC[u.pathname]) {
       const [f, type] = STATIC[u.pathname];
       return send(res, 200, fs.readFileSync(path.join(DIR, 'public', f)), type);
     }
     if (u.pathname === '/health') return send(res, 200, { ok: true, payments: ledger.length });
     // Published audit roots, and a receipt's proofs against them (amounts and states only, no customer data).
-    if (req.method === 'GET' && u.pathname === '/api/procure')
-      return send(res, 200, { mandate: (({ sig, ...m }) => m)(MANDATE), stock: supplies.items.map(i => ({ sku: i.sku, en: i.en, sq: i.sq, stock: proc.stock[i.sku] ?? i.stock })), history: proc.history.slice(-20).reverse() });
+    if (req.method === 'GET' && u.pathname === '/api/procure') {
+      const p = procOf(till), o = owners[till];
+      return send(res, 200, { mandate: unsig(o?.mandate || DEMO), owner: o ? { key: o.key, mandate: !!o.mandate } : null, supplier: { ...supplies.supplier, email: undefined },
+        supplies: supplies.items.map(i => ({ sku: i.sku, en: i.en, sq: i.sq, reference: i.reference, stock: p.stock[i.sku] ?? i.stock })), history: p.history.slice(-20).reverse() });
+    }
+    // The latest tree head, with our signature and the witness's, and the keys to check both against.
+    if (req.method === 'GET' && u.pathname === '/api/head') {
+      await cosign().catch(() => {});
+      return send(res, 200, { ...witnessed, tillKey: der(tillKey.pub), pinnedSupplier: SUPPLIER_URL ? await supplierKey().catch(() => null) : null, chain: chain.length });
+    }
     if (req.method === 'GET' && u.pathname === '/api/audit') {
       const day = /^\d{4}-\d{2}-\d{2}$/.test(u.searchParams.get('day') || '') ? u.searchParams.get('day') : new Date().toISOString().slice(0, 10);
       const d = auditDay(day);
@@ -457,11 +544,14 @@ http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && u.pathname.startsWith('/api/receipt/')) {
       const ref = u.pathname.slice(13).toUpperCase();
+      // Each fact with its proof into the day's root and into the whole log up to the last countersigned tree head.
+      await cosign().catch(() => {});
+      const n = witnessed?.head.n ?? 0, log = chain.slice(0, n).map(c => c.data);
       const facts = chain.filter(c => c.data.ref === ref).map(c => {
         const day = c.data.at.slice(0, 10), d = auditDay(day), i = d.indexOf(c.data);
-        return { fact: c.data, day, proof: proof(d, i), root: root(d) };
+        return { fact: c.data, index: c.n, day, proof: proof(d, i), root: root(d), logProof: c.n < n ? proof(log, c.n) : null };
       });
-      return facts.length ? send(res, 200, { ref, facts }) : send(res, 404, { error: 'Not found' });
+      return facts.length ? send(res, 200, { ref, facts, head: witnessed, tillKey: der(tillKey.pub), supplierUrl: SUPPLIER_URL || null }) : send(res, 404, { error: 'Not found' });
     }
     if (req.method === 'GET' && u.pathname === '/api/catalog') return send(res, 200, catalog);
     if (req.method === 'GET' && u.pathname === '/paid') {
@@ -487,8 +577,24 @@ http.createServer(async (req, res) => {
       return send(res, 200, card(await execute(p)));
     }
     if (u.pathname === '/api/dismiss') { pending.delete(String(b.id)); return send(res, 200, { ok: true }); }
-    // Anyone may run the sandbox demo (the mandate bounds it). With real money it waits for owner sign-in, which does not exist yet.
-    if (u.pathname === '/api/procure') return process.env.PAYPAL_ENV === 'live' ? send(res, 403, { error: 'Owner sign-in required' }) : send(res, 200, await procureNow());
+    // Owner sign-in is a key, not a password: the first key a till registers is its owner, for good.
+    if (u.pathname === '/api/owner') {
+      if (owners[till]) return send(res, 409, { error: 'This till already has an owner' });
+      if (typeof b.key !== 'string' || b.key.length > 200) return send(res, 400, { error: 'Bad key' });
+      try { pemOf(b.key); } catch { return send(res, 400, { error: 'Not an Ed25519 public key' }); }
+      if (crypto.createPublicKey(pemOf(b.key)).asymmetricKeyType !== 'ed25519') return send(res, 400, { error: 'Not an Ed25519 public key' });
+      owners[till] = { key: b.key, since: new Date().toISOString() }; writeJson(OWNERS, owners);
+      return send(res, 200, { ok: true });
+    }
+    if (u.pathname === '/api/mandate') { acceptMandate(till, b.mandate); return send(res, 200, { ok: true, mandate: unsig(b.mandate) }); }
+    // A till with an owner runs only on the owner's signed word, under the owner's mandate. Without one: the sandbox
+    // demo under the demo mandate; with real money, nothing.
+    if (u.pathname === '/api/procure') {
+      const signed = ownerSaid(till, b);
+      if (owners[till] && !signed) return send(res, 403, { error: 'Owner signature required' });
+      if (!signed && process.env.PAYPAL_ENV === 'live') return send(res, 403, { error: 'Owner sign-in required' });
+      return send(res, 200, await procureNow(till, signed));
+    }
     send(res, 404, { error: 'Not found' });
   } catch (err) {
     console.error(new Date().toISOString(), u.pathname, err.message);

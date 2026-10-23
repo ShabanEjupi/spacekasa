@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>SpaceKasa receipt</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="verify">
+<header>
+  <div class="brand"><span class="logo" aria-hidden="true"></span><b>SpaceKasa</b><small data-t="tag"></small></div>
+  <div class="tools"><button id="lang" class="ghost" aria-label="Language">SQ</button></div>
+</header>
+<main class="receipt">
+  <section class="card">
+    <div class="kicker"><span id="ref"></span><span class="badge" id="status"></span></div>
+    <div class="total" id="amount"></div>
+    <div class="hint" id="when"></div>
+    <ol id="checks"></ol>
+    <p class="hint" data-t="how"></p>
+  </section>
+</main>
+<script src="/sk.js"></script>
+<script src="/verify.js"></script>
+</body>
+</html>

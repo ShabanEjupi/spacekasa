@@ -10,3 +10,15 @@ services:
       - /mnt/data/spacekasa:/data
     env_file: .env
     mem_limit: 256m
+  # The supplier: a second, separate instance (its own key, data and prices) that the till reaches over the internet.
+  spacekasa-supplier:
+    build: .
+    container_name: spacekasa-supplier
+    restart: always
+    network_mode: bridge
+    command: ["node", "supplier.mjs"]
+    ports:
+      - "127.0.0.1:8311:8080"
+    volumes:
+      - /mnt/data/spacekasa-supplier:/data
+    mem_limit: 128m

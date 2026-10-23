@@ -17,16 +17,31 @@ export function append(chain, data) {
 export const intact = chain => chain.every((e, i) => e.n === i && e.prev === (i ? chain[i - 1].hash : '0'.repeat(64))
   && e.hash === H(canonical({ n: e.n, prev: e.prev, data: e.data })));
 
-// Merkle tree over a list of entries; an odd node is carried up unchanged.
-function levels(entries) {
-  const L = [entries.map(leaf)];
+// Merkle tree over a list of entries (or of their leaf hashes); an odd node is carried up unchanged.
+function levels(entries, hashed = false) {
+  const L = [hashed ? entries : entries.map(leaf)];
   while (L.at(-1).length > 1) { const p = L.at(-1), up = []; for (let i = 0; i < p.length; i += 2) up.push(i + 1 < p.length ? node(p[i], p[i + 1]) : p[i]); L.push(up); }
   return L;
 }
-export const root = entries => entries.length ? levels(entries).at(-1)[0] : null;
+export const root = (entries, hashed) => entries.length ? levels(entries, hashed).at(-1)[0] : null;
+export { leaf };
 export function proof(entries, i) {
   const out = [];
   for (const lv of levels(entries).slice(0, -1)) { const j = i ^ 1; if (j < lv.length) out.push([i & 1 ? 'L' : 'R', lv[j]]); i >>= 1; }
   return out;
 }
 export const verifyProof = (entry, steps, r) => steps.reduce((h, [side, s]) => side === 'L' ? node(s, h) : node(h, s), leaf(entry)) === r;
+
+// What a witness keeps of someone else's chain: its length, last hash and leaf hashes (no data). `extend` accepts new
+// entries only if they continue that chain link by link — the check that makes a countersigned tree head mean
+// "these books were only ever appended to".
+export function extend(state, entries) {
+  let { n, head } = state; const leaves = [...state.leaves];
+  for (const e of entries) {
+    if (e.n !== n || e.prev !== head || e.hash !== H(canonical({ n: e.n, prev: e.prev, data: e.data })))
+      throw Object.assign(new Error(`entry ${e.n} does not continue the chain at ${n}`), { status: 409 });
+    leaves.push(leaf(e.data)); head = e.hash; n++;
+  }
+  return { n, head, leaves, root: root(leaves, true) };
+}
+export const genesis = () => ({ n: 0, head: '0'.repeat(64), leaves: [] });
