@@ -19,6 +19,8 @@ const key = keyFile(path.join(DATA, 'supplier-key.json'), writeJson);
 const deals = read('deals.json', []);
 // Per till we witness: its pinned key, what we have seen of its chain, and the last head we countersigned.
 const books = read('witness.json', {});
+const WITNESS = (process.env.WITNESS_LOGS || 'https://kasa.spacecode.tech,test').split(',');
+for (const k of Object.keys(books)) if (!WITNESS.includes(k)) delete books[k];
 const desk = supplierDesk({ catalog, key, log: d => { deals.push(d); if (deals.length > 500) deals.splice(0, deals.length - 500); writeJson(path.join(DATA, 'deals.json'), deals); } });
 
 const send = (res, code, obj, type = 'application/json') => {
@@ -41,7 +43,7 @@ http.createServer(async (req, res) => {
     if (req.method === 'GET' && ['/sk.js', '/style.css'].includes(u.pathname)) return send(res, 200, fs.readFileSync(path.join(DIR, 'public', u.pathname.slice(1))), u.pathname.endsWith('.js') ? 'text/javascript' : 'text/css');
     if (req.method === 'GET' && u.pathname === '/a2a/key') return send(res, 200, { id: catalog.supplier.id, name: catalog.supplier.name, key: der(key.pub) });
     if (req.method === 'GET' && u.pathname === '/api/deals') return send(res, 200, { supplier: catalog.supplier, key: der(key.pub), deals: deals.slice(-20).reverse().map(view),
-      witnessed: Object.entries(books).map(([till, b]) => ({ till: till.slice(0, 16), n: b.state.n, head: b.state.head, root: b.state.root, at: b.at })) });
+      witnessed: Object.entries(books).map(([till, b]) => ({ log: till, n: b.state.n, head: b.state.head, root: b.state.root, at: b.at })) });
     if (req.method !== 'POST') return send(res, 404, { error: 'Not found' });
     const b = await body(req);
     if (u.pathname === '/a2a/offer') return send(res, 200, desk(b));
@@ -49,13 +51,15 @@ http.createServer(async (req, res) => {
       // The till's key is pinned the first time it asks; a head signed by any other key is refused.
       const { head, sig, key: tillKey, entries } = b;
       if (!head || typeof tillKey !== 'string' || !Array.isArray(entries)) return send(res, 400, { error: 'bad request' });
-      const id = tillKey, book = books[id] || { state: genesis() };
-      if (!verifyObj(head, sig, pemOf(tillKey))) return send(res, 400, { error: 'till signature does not verify' });
+      // Only the logs we agreed to witness, each pinned to the first key that signed for it.
+      const id = head.log, book = books[id] || { state: genesis(), key: tillKey };
+      if (!WITNESS.includes(id)) return send(res, 403, { error: 'we do not witness this log' });
+      if (book.key !== tillKey || !verifyObj(head, sig, pemOf(tillKey))) return send(res, 400, { error: 'till signature does not verify' });
       if (head.n < book.state.n) return send(res, 409, { error: `we already countersigned ${book.state.n} entries` });
       const from = entries[0]?.n ?? book.state.n;
       if (from > book.state.n) return send(res, 409, { error: `send entries from ${book.state.n}`, need: book.state.n });
       const w = witness(book.state, { entries: entries.slice(book.state.n - from), head }, key);
-      books[id] = { state: { ...w.state }, at: new Date().toISOString() };
+      books[id] = { state: w.state, key: tillKey, at: new Date().toISOString() };
       writeJson(path.join(DATA, 'witness.json'), books);
       return send(res, 200, { cosig: w.cosig, key: der(key.pub) });
     }

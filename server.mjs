@@ -591,7 +591,6 @@ http.createServer(async (req, res) => {
     // demo under the demo mandate; with real money, nothing.
     if (u.pathname === '/api/procure') {
       const signed = ownerSaid(till, b);
-      if (owners[till] && !signed) return send(res, 403, { error: 'Owner signature required' });
       if (!signed && process.env.PAYPAL_ENV === 'live') return send(res, 403, { error: 'Owner sign-in required' });
       return send(res, 200, await procureNow(till, signed));
     }

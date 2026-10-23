@@ -17,6 +17,8 @@ services:
     restart: always
     network_mode: bridge
     command: ["node", "supplier.mjs"]
+    environment:
+      - WITNESS_LOGS=https://kasa.spacecode.tech
     ports:
       - "127.0.0.1:8311:8080"
     volumes:

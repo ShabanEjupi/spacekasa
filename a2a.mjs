@@ -57,6 +57,7 @@ export function supplierDesk({ catalog, key, log }) {
     if (!s) throw Object.assign(new Error(`we do not sell ${msg.sku}`), { status: 400 });
     if (!(Number.isInteger(msg.qty) && msg.qty > 0 && msg.qty <= 10000)) throw Object.assign(new Error('bad quantity'), { status: 400 });
     for (const [k, v] of sessions) if (Date.now() - v.at > 10 * 60e3) sessions.delete(k);
+    if (!sessions.has(msg.session) && sessions.size >= 2000) throw Object.assign(new Error('busy, try again later'), { status: 429 });
     const st = sessions.get(msg.session) || { round: 0, asks: {}, at: Date.now(), sku: msg.sku, buyer: buyerKey, transcript: [] };
     if (st.done || st.sku !== msg.sku || st.buyer !== buyerKey) throw Object.assign(new Error('session closed'), { status: 409 });
     let reply;
