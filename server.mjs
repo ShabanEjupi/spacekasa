@@ -487,7 +487,8 @@ http.createServer(async (req, res) => {
       return send(res, 200, card(await execute(p)));
     }
     if (u.pathname === '/api/dismiss') { pending.delete(String(b.id)); return send(res, 200, { ok: true }); }
-    if (u.pathname === '/api/procure') return send(res, 200, await procureNow());
+    // Anyone may run the sandbox demo (the mandate bounds it). With real money it waits for owner sign-in, which does not exist yet.
+    if (u.pathname === '/api/procure') return process.env.PAYPAL_ENV === 'live' ? send(res, 403, { error: 'Owner sign-in required' }) : send(res, 200, await procureNow());
     send(res, 404, { error: 'Not found' });
   } catch (err) {
     console.error(new Date().toISOString(), u.pathname, err.message);
