@@ -70,10 +70,16 @@ for (const [i, seg] of script.entries()) {
     const pctx = await b.newContext({ ...devices['iPhone 13'], locale: 'en-US', recordVideo: { dir: `${dir}/ph`, size: { width: 780, height: 1328 } } });
     const buyer = await pctx.newPage();
     const pStart = now();
-    await buyer.goto(url);
+    await buyer.goto(url + '&locale.x=en_US'); // the host sits in the Netherlands, so PayPal would otherwise speak Dutch
     await buyer.locator('#email').pressSequentially(process.env.BUYER_EMAIL, { delay: 25, timeout: 60000 });
     await buyer.click('#btnNext');
-    await buyer.locator('#password').pressSequentially(process.env.BUYER_PASS, { delay: 30, timeout: 30000 });
+    // The password page re-renders right after it appears and drops what was typed; type again until it sticks.
+    for (let i = 0; i < 4; i++) {
+      await buyer.waitForTimeout(1000);
+      await buyer.locator('#password').fill('', { timeout: 30000 });
+      await buyer.locator('#password').pressSequentially(process.env.BUYER_PASS, { delay: 30 });
+      if (await buyer.locator('#password').inputValue() === process.env.BUYER_PASS) break;
+    }
     await buyer.click('#btnLogin');
     // Same button variants as test/pay.mjs: the mobile sandbox page labels it differently. A screenshot tells why when none shows.
     await buyer.locator('#payment-submit-btn, button:has-text("Complete Purchase"), button:has-text("Pay"), button:has-text("Continue to Review Order")').first()
