@@ -1,0 +1,20 @@
+// node test/audit.test.mjs — tamper evidence of the chain, and Merkle inclusion proofs for receipts.
+import { append, intact, root, proof, verifyProof } from '../audit.mjs';
+let fail = 0;
+const ok = (c, m) => { console.log((c ? '✓ ' : '✗ ') + m); if (!c) fail = 1; };
+const chain = [];
+for (let i = 0; i < 37; i++) append(chain, { kind: i % 3 ? 'sale' : 'buy', ref: `K-${1000 + i}`, total: 3.5 + i });
+ok(intact(chain), '37 entries, chain intact');
+const edited = structuredClone(chain); edited[12].data.total = 0.01;
+ok(!intact(edited), 'editing one amount breaks the chain');
+const rehashed = structuredClone(edited); rehashed[12].hash = 'f'.repeat(64);
+ok(!intact(rehashed), '…and re-hashing that entry breaks the next link');
+const day = chain.map(e => e.data), r = root(day);
+ok([...day.keys()].every(i => verifyProof(day[i], proof(day, i), r)), `every one of ${day.length} entries proves its inclusion (odd sizes too)`);
+ok(proof(day, 5).length <= Math.ceil(Math.log2(day.length)), `a proof is ${proof(day, 5).length} hashes: fits in a receipt QR`);
+ok(!verifyProof({ ...day[5], total: 99 }, proof(day, 5), r), 'a forged receipt amount fails against the published root');
+ok(!verifyProof(day[5], proof(day, 6), r), 'a proof for another entry fails');
+const late = [...day]; late[3] = { ...late[3], total: 1 };
+ok(root(late) !== r, 'changing the books after publishing changes the root');
+ok(root([day[0]]) !== null && verifyProof(day[0], proof([day[0]], 0), root([day[0]])), 'a day with one entry works');
+process.exit(fail);
