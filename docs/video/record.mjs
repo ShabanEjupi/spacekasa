@@ -50,11 +50,17 @@ const card = ([title, big, small]) => `<!doctype html><meta charset="utf-8"><sty
 
 const timeline = [];
 let phone;
+// Counts are taken when a segment ACTS. A segment that only waits (e.g. "turns Paid") compares against the last action,
+// because the change may already have happened while the previous segment ran.
+const sels = [...new Set(script.map(s => s.until).filter(Boolean))];
+let mark = {};
 for (const [i, seg] of script.entries()) {
   const start = now();
+  const acts = seg.type || seg.click || seg.pay || seg.goto || seg.card;
   if (seg.card) await p.setContent(card(T[lang][seg.card]));
   if (seg.goto) { await p.goto(base); await p.mouse.move(mouse.x, mouse.y); await sleep(1.2); }
-  const before = seg.until ? await p.locator(seg.until).count() : 0;
+  if (acts) for (const s of sels) mark[s] = await p.locator(s).count();
+  const before = mark[seg.until] ?? 0;
   let acted = start;
   const typed = lang === 'sq' ? seg.type_sq || seg.type : seg.type;
   if (typed) {
