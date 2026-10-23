@@ -9,8 +9,9 @@ const [base, dir, lang = 'en'] = process.argv.slice(2);
 const script = JSON.parse(fs.readFileSync(new URL('./script.json', import.meta.url)));
 const durs = JSON.parse(fs.readFileSync(`${dir}/durations.json`));
 const b = await chromium.launch();
-const ctx = await b.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1.5, colorScheme: 'light',
-  recordVideo: { dir, size: { width: 1920, height: 1080 } }, locale: lang === 'sq' ? 'sq-AL' : 'en-US' });
+const ctx = await b.newContext({ viewport: { width: 1280, height: 720 }, colorScheme: 'light',
+  // Playwright records at CSS-pixel size and never scales up; compose.mjs scales to 1080p.
+  recordVideo: { dir, size: { width: 1280, height: 720 } }, locale: lang === 'sq' ? 'sq-AL' : 'en-US' });
 // Video has no mouse pointer of its own: draw one, with a ring on every click, so viewers can follow the cashier.
 await ctx.addInitScript(() => addEventListener('DOMContentLoaded', () => {
   const c = document.createElement('div');
@@ -73,7 +74,7 @@ for (const [i, seg] of script.entries()) {
   if (seg.pay) {
     // The customer's phone: a separate browser, recorded on its own, pays the newest QR in the PayPal sandbox.
     const url = await p.locator('.card.payment a.btn').last().getAttribute('href');
-    const pctx = await b.newContext({ ...devices['iPhone 13'], locale: 'en-US', recordVideo: { dir: `${dir}/ph`, size: { width: 780, height: 1328 } } });
+    const pctx = await b.newContext({ ...devices['iPhone 13'], locale: 'en-US', recordVideo: { dir: `${dir}/ph`, size: devices['iPhone 13'].viewport } });
     const buyer = await pctx.newPage();
     const pStart = now();
     await buyer.goto(url + '&locale.x=en_US'); // the host sits in the Netherlands, so PayPal would otherwise speak Dutch

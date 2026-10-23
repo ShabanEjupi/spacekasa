@@ -67,10 +67,10 @@ for (const s of timeline) {
 fs.writeFileSync(`${dir}/subs.srt`, subs.join('\n'));
 
 const v = pieces.map((p, k) => {
-  const main = `[0:v]trim=start=${p.a.toFixed(3)}:end=${p.b.toFixed(3)},setpts=(PTS-STARTPTS)/${p.speed.toFixed(3)}`;
+  const main = `[0:v]trim=start=${p.a.toFixed(3)}:end=${p.b.toFixed(3)},setpts=(PTS-STARTPTS)/${p.speed.toFixed(3)},scale=1920:1080:flags=lanczos`;
   if (!p.phone) return `${main}[v${k}]`;
   return `${main}[m${k}];[1:v]trim=start=${(p.a - phone.start).toFixed(3)}:end=${(p.b - phone.start).toFixed(3)},`
-    + `setpts=(PTS-STARTPTS)/${p.speed.toFixed(3)},scale=-2:880,pad=iw+28:ih+28:14:14:color=0x101413[p${k}];`
+    + `setpts=(PTS-STARTPTS)/${p.speed.toFixed(3)},scale=-2:880:flags=lanczos,pad=iw+28:ih+28:14:14:color=0x101413[p${k}];`
     + `[m${k}][p${k}]overlay=W-w-80:(H-h)/2:eof_action=repeat[v${k}]`;
 }).join(';');
 const inputs = phone ? 2 : 1;
