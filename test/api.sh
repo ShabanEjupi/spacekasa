@@ -13,9 +13,12 @@ r=$(chat "Invoice <img src=x onerror=alert(1)> for one espresso")
 ok "$(echo "$r" | j 'next(("<" in c["customer"] for c in d["cards"] if c["type"]=="proposal"),False)')" "False" "markup stripped from customer name"
 # Confirm that invoice so the cancel check below always has something to cancel.
 id=$(echo "$r" | j 'next((c["id"] for c in d["cards"] if c["type"]=="proposal"),"")')
+ok "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/confirm" -H 'X-Till: othertill01' -H 'Content-Type: application/json' -d "{\"id\":\"$id\"}")" "410" "another till cannot confirm this proposal"
+curl -s "$B/api/dismiss" -H 'X-Till: othertill01' -H 'Content-Type: application/json' -d "{\"id\":\"$id\"}" >/dev/null	# nor dismiss it: the confirm below still works
 INV=$(curl -s "$B/api/confirm" -H 'Content-Type: application/json' -d "{\"id\":\"$id\"}" | j 'd["ref"] if d.get("status")=="awaiting_payment" else ""')
 
 ok "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/confirm" -H 'Content-Type: application/json' -d '{"id":"deadbeef0000"}')" "410" "unknown proposal id refused"
+ok "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/owner" -H 'Content-Type: application/json' -d '{"key":"x"}')" "400" "nobody can own the shared public till"
 ok "$(head -c 70000 /dev/zero | tr '\0' a | curl -s -o /dev/null -w '%{http_code}' "$B/api/chat" -H 'Content-Type: application/json' --data-binary @-)" "413" "oversized body rejected"
 ok "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/chat" -H 'Content-Type: application/json' -d '{bad')" "400" "malformed JSON rejected"
 

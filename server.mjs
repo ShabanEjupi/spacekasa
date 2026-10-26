@@ -572,13 +572,15 @@ http.createServer(async (req, res) => {
     if (u.pathname === '/api/chat') return send(res, 200, await chat(Array.isArray(b.messages) ? b.messages : [], b.lang, till));
     if (u.pathname === '/api/confirm') {
       const p = pending.get(String(b.id));
-      if (!p || Date.now() - p.at > PENDING_TTL) return send(res, 410, { error: 'This proposal expired — ask again' });
+      // A proposal belongs to the till that asked for it; another till sees the same answer as for an unknown id.
+      if (!p || p.data.till !== till || Date.now() - p.at > PENDING_TTL) return send(res, 410, { error: 'This proposal expired — ask again' });
       pending.delete(String(b.id));
       return send(res, 200, card(await execute(p)));
     }
-    if (u.pathname === '/api/dismiss') { pending.delete(String(b.id)); return send(res, 200, { ok: true }); }
+    if (u.pathname === '/api/dismiss') { if (pending.get(String(b.id))?.data.till === till) pending.delete(String(b.id)); return send(res, 200, { ok: true }); }
     // Owner sign-in is a key, not a password: the first key a till registers is its owner, for good.
     if (u.pathname === '/api/owner') {
+      if (till === 'public') return send(res, 400, { error: 'Send an X-Till id to own a till' });  // the shared fallback is nobody's
       if (owners[till]) return send(res, 409, { error: 'This till already has an owner' });
       if (typeof b.key !== 'string' || b.key.length > 200) return send(res, 400, { error: 'Bad key' });
       try { pemOf(b.key); } catch { return send(res, 400, { error: 'Not an Ed25519 public key' }); }
