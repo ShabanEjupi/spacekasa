@@ -21,6 +21,8 @@ const deals = read('deals.json', []);
 const books = read('witness.json', {});
 const WITNESS = (process.env.WITNESS_LOGS || 'https://kasa.spacecode.tech,test').split(',');
 for (const k of Object.keys(books)) if (!WITNESS.includes(k)) delete books[k];
+// Optional {"<log>": "<till key, base64 SPKI>"}: without it the first key to ask for a log owns it (trust on first use).
+const KEYS = JSON.parse(process.env.WITNESS_KEYS || '{}');
 const desk = supplierDesk({ catalog, key, log: d => { deals.push(d); if (deals.length > 500) deals.splice(0, deals.length - 500); writeJson(path.join(DATA, 'deals.json'), deals); } });
 
 const send = (res, code, obj, type = 'application/json') => {
@@ -52,7 +54,7 @@ http.createServer(async (req, res) => {
       const { head, sig, key: tillKey, entries } = b;
       if (!head || typeof tillKey !== 'string' || !Array.isArray(entries)) return send(res, 400, { error: 'bad request' });
       // Only the logs we agreed to witness, each pinned to the first key that signed for it.
-      const id = head.log, book = books[id] || { state: genesis(), key: tillKey };
+      const id = head.log, book = books[id] || { state: genesis(), key: KEYS[id] || tillKey };
       if (!WITNESS.includes(id)) return send(res, 403, { error: 'we do not witness this log' });
       if (book.key !== tillKey || !verifyObj(head, sig, pemOf(tillKey))) return send(res, 400, { error: 'till signature does not verify' });
       if (head.n < book.state.n) return send(res, 409, { error: `we already countersigned ${book.state.n} entries` });

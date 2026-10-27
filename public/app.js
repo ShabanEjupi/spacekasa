@@ -129,22 +129,26 @@ function paymentCard(p) {
   return box;
 }
 
+let polling = false;           // one poll loop; a card watched while a poll is in flight used to start a second one
 function watch(ref, box) {
   watching.set(ref, box);
-  if (watching.size === 1) setTimeout(poll, 4000);
+  if (!polling) { polling = true; setTimeout(poll, 4000); }
 }
 async function poll() {
-  for (const [ref, box] of watching) {
+  for (const [ref] of watching) {
     try {
-      const p = await (await fetch(`/api/payment/${ref}`, { headers: H })).json();
+      const r = await fetch(`/api/payment/${ref}`, { headers: H });
+      if (!r.ok) continue;          // a PayPal hiccup is not a final state: keep the QR up and ask again
+      const p = await r.json();
       if (p.status !== 'awaiting_payment') {
         watching.delete(ref);
-        if (box.isConnected) box.replaceWith(paymentCard(p));
+        // Every card of this payment (check_payment can show it twice), not only the last one watched.
+        document.querySelectorAll(`.card.payment[data-ref="${ref}"]`).forEach(n => n.replaceWith(paymentCard(p)));
         loadPayments();
       }
     } catch {}
   }
-  if (watching.size) setTimeout(poll, 4000);
+  if (watching.size) setTimeout(poll, 4000); else polling = false;
 }
 
 async function post(url, data) {
@@ -183,9 +187,9 @@ $('#ask').onsubmit = e => { e.preventDefault(); const q = $('#q'); const v = q.v
 
 async function loadPayments() {
   try {
-    const list = await (await fetch('/api/payments', { headers: H })).json();
-    const today = new Date().toDateString();
-    const todays = list.filter(p => new Date(p.created).toDateString() === today);
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const list = await (await fetch(`/api/payments?since=${midnight.toISOString()}`, { headers: H })).json();
+    const todays = list.filter(p => new Date(p.created) >= midnight);
     const ol = $('#payments');
     ol.replaceChildren(...todays.slice(0, 12).map(p => {
       const li = el('li', `s-${p.status}`);
@@ -194,9 +198,11 @@ async function loadPayments() {
       return li;
     }));
     if (!todays.length) ol.replaceChildren(el('li', 'empty', t('none')));
-    const paid = todays.filter(p => p.status === 'paid').reduce((s, p) => s + Number(p.total), 0);
-    const wait = todays.filter(p => p.status === 'awaiting_payment').reduce((s, p) => s + Number(p.total), 0);
-    $('#summary').replaceChildren(el('div', 'stat', `${paid.toFixed(2)} € ${t('paid_s')}`), el('div', 'stat dim', `${wait.toFixed(2)} € ${t('awaiting_s')}`));
+    // Whole cents, net of partial refunds, in the shop's currency.
+    const c = s => Math.round(Number(s || 0) * 100), cur = todays[0]?.currency || 'EUR';
+    const paid = todays.filter(p => p.status === 'paid').reduce((s, p) => s + c(p.total) - c(p.refunded), 0);
+    const wait = todays.filter(p => p.status === 'awaiting_payment').reduce((s, p) => s + c(p.total), 0);
+    $('#summary').replaceChildren(el('div', 'stat', `${(paid / 100).toFixed(2)} ${cur} ${t('paid_s')}`), el('div', 'stat dim', `${(wait / 100).toFixed(2)} ${cur} ${t('awaiting_s')}`));
   } catch {}
 }
 

@@ -128,13 +128,16 @@ async function procureNow(till, signed) {
     const pub = mandate === DEMO ? owner.pub : pemOf(owners[till].key);
     const now = Date.now(), items = supplies.items.map(i => ({ ...i, stock: p.stock[i.sku] ?? i.stock }));
     // Real paid sales from the till, on top of eight simulated weeks (labelled) so the forecast has history to learn from.
-    const sales = [...simulatedSales(now), ...mine(till).filter(e => e.status === 'paid').map(e => ({ at: e.paid_at || e.created, lines: e.lines }))];
+    // Never with real money: a live till buys for its own demand only.
+    const sales = [...(process.env.PAYPAL_ENV === 'live' ? [] : simulatedSales(now)), ...mine(till).filter(e => e.status === 'paid').map(e => ({ at: e.paid_at || e.created, lines: e.lines }))];
     const sKey = SUPPLIER_URL ? pemOf(await supplierKey()) : null;
     const seller = item => SUPPLIER_URL ? remoteSeller(SUPPLIER_URL, sKey, { id: BASE_URL, ...tillKey })
       : localSeller(localDesk.items.find(i => i.sku === item.sku));
-    const trace = await procure({ supplies: { ...supplies, items }, sales, mandates: [mandate], pub, history: p.history, now, seller,
+    let trace;
+    try {
+    trace = await procure({ supplies: { ...supplies, items }, sales, mandates: [mandate], pub, history: p.history, now, seller,
       pay: async (item, deal, contract) => {
-        const value = (Math.round(deal.unit * deal.qty * 100) / 100).toFixed(2);
+        const value = money(cents(deal.unit) * deal.qty);   // integer cents, exactly as the mandate verifier counted them
         const r = await pp('POST', '/v1/payments/payouts', { sender_batch_header: { sender_batch_id: `SK-${crypto.randomUUID()}`, email_subject: `Order: ${deal.qty} × ${item.en}` },
           items: [{ recipient_type: 'EMAIL', receiver: supplies.supplier.email, amount: { value, currency: CUR }, note: `${deal.qty} × ${item.en} at ${deal.unit}` }] });
         const id = r.batch_header.payout_batch_id;
@@ -142,8 +145,11 @@ async function procureNow(till, signed) {
         writeJson(AUDIT, chain);
         return { id };
       } });
-    for (const i of items) p.stock[i.sku] = i.stock;
-    writeJson(PROC, procs);
+    } finally {
+      // Keep what was bought even when a later item fails, or the next run buys it again.
+      for (const i of items) p.stock[i.sku] = i.stock;
+      writeJson(PROC, procs);
+    }
     cosign().catch(err => console.error('witness:', err.message));
     return { mandate: unsig(mandate), owner: mandate !== DEMO, supplierKey: sKey ? der(sKey) : null, trace };
   } finally { procuring = false; }
@@ -188,7 +194,7 @@ let token = { v: '', exp: 0 };
 async function pp(method, url, body) {
   if (Date.now() > token.exp) {
     const r = await fetch(`${PP_BASE}/v1/oauth2/token`, {
-      method: 'POST', body: 'grant_type=client_credentials',
+      method: 'POST', body: 'grant_type=client_credentials', signal: AbortSignal.timeout(30e3),
       headers: { Authorization: 'Basic ' + Buffer.from(`${PP_ID}:${PP_SECRET}`).toString('base64'),
                  'Content-Type': 'application/x-www-form-urlencoded' },
     });
@@ -200,7 +206,7 @@ async function pp(method, url, body) {
     method,
     headers: { Authorization: `Bearer ${token.v}`, 'Content-Type': 'application/json',
                Prefer: 'return=representation', 'PayPal-Request-Id': crypto.randomUUID() },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30e3),
   });
   const text = await r.text();
   const j = text ? JSON.parse(text) : {};
@@ -222,8 +228,8 @@ function priceLines(items, seen) {
     // A SKU the model never saw in a search result is a guess; make it look.
     if (!seen.has(p.sku)) throw new Error(`${p.sku} was not in any find_products result — search for that item first`);
     const qty = Math.floor(Number(it.qty));
-    if (!(qty >= 1 && qty <= 99)) throw new Error(`Bad quantity for ${p.sku}`);
     const prev = lines.find(l => l.sku === p.sku);
+    if (!(qty >= 1 && qty + (prev?.qty || 0) <= 99)) throw new Error(`Bad quantity for ${p.sku}`);
     if (prev) prev.qty += qty; else lines.push({ sku: p.sku, en: p.en, sq: p.sq, qty, unit: cents(p.price) });
   }
   return { lines, total: lines.reduce((s, l) => s + l.unit * l.qty, 0) };
@@ -274,8 +280,19 @@ async function createInvoice(data) {
   return e;
 }
 
+// One PayPal operation per payment at a time. The cashier's poll and the customer's return to /paid arrive together;
+// run side by side, both would capture, and the loser's 422 ORDER_ALREADY_CAPTURED marked a paid payment "failed".
+const locks = new Map();
+function serial(ref, f) {
+  const p = (locks.get(ref) || Promise.resolve()).then(f), tail = p.catch(() => {});
+  locks.set(ref, tail);
+  tail.then(() => { if (locks.get(ref) === tail) locks.delete(ref); });
+  return p;
+}
+const refresh = e => e && e.status === 'awaiting_payment' ? serial(e.ref, () => refreshNow(e)) : Promise.resolve(e);
+
 // Ask PayPal where a payment stands; capture approved QR orders on the way.
-async function refresh(e) {
+async function refreshNow(e) {
   if (!e || e.status !== 'awaiting_payment') return e;
   if (e.kind === 'qr') {
     let o = await pp('GET', `/v2/checkout/orders/${e.paypal_id}`);
@@ -288,16 +305,20 @@ async function refresh(e) {
         return e;
       }
     }
-    if (o.status === 'COMPLETED') {
-      const cap = o.purchase_units?.[0]?.payments?.captures?.[0];
-      Object.assign(e, { status: 'paid', capture_id: cap?.id, paid_at: new Date().toISOString(), payer: o.payer?.name?.given_name });
+    const cap = o.purchase_units?.[0]?.payments?.captures?.[0];
+    // A PENDING capture (e.g. under review) is not money yet: keep waiting until PayPal completes or declines it.
+    if (o.status === 'COMPLETED' && cap?.status === 'COMPLETED') {
+      Object.assign(e, { status: 'paid', capture_id: cap.id, paid_at: new Date().toISOString(), payer: o.payer?.name?.given_name });
       save(e);
-    }
+    } else if (['DECLINED', 'FAILED'].includes(cap?.status)) {
+      Object.assign(e, { status: 'failed', error: `capture ${cap.status.toLowerCase()}` }); save(e);
+    } else if (o.status === 'VOIDED') { e.status = 'cancelled'; save(e); }
   } else if (e.kind === 'invoice') {
     const inv = await pp('GET', `/v2/invoicing/invoices/${e.paypal_id}`);
     if (['PAID', 'MARKED_AS_PAID'].includes(inv.status)) {
+      // MARKED_AS_PAID was paid outside PayPal (cash, bank): its payment_id is no PayPal capture and cannot be refunded here.
       Object.assign(e, { status: 'paid', paid_at: new Date().toISOString(),
-                         capture_id: inv.payments?.transactions?.[0]?.payment_id });
+                         capture_id: inv.status === 'PAID' ? inv.payments?.transactions?.[0]?.payment_id : undefined });
       save(e);
     } else if (inv.status === 'CANCELLED') { e.status = 'cancelled'; save(e); }
   }
@@ -308,8 +329,13 @@ async function execute({ kind, data }) {
   if (kind === 'checkout') return data.method === 'invoice' ? createInvoice(data) : createQr(data);
   const e = findRef(data.ref, data.till);
   if (!e) throw new Error('Unknown reference');
-  await refresh(e);
+  // Check and act under the payment's lock: two refunds confirmed at once must not both pass the "left to refund" check.
+  return serial(e.ref, () => settle(e, kind, data));
+}
+async function settle(e, kind, data) {
+  await refreshNow(e);
   if (kind === 'refund') {
+    if (e.status === 'paid' && !e.capture_id) throw new Error(`${e.ref} was paid outside PayPal — refund it the same way`);
     if (e.status !== 'paid' || !e.capture_id) throw new Error(`${e.ref} is not paid — nothing to refund`);
     const amount = data.amount ?? e.total - (e.refunded || 0);
     if (!(amount > 0 && amount <= e.total - (e.refunded || 0))) throw new Error('Refund exceeds what was paid');
@@ -391,7 +417,7 @@ async function runTool(name, a, cards, seen, till) {
     const c = String(a.customer || '').toLowerCase();
     const rows = mine(till).reverse()
       .filter(e => (!c || (e.customer || '').toLowerCase().includes(c)) && (!a.status || e.status === a.status))
-      .slice(0, Math.min(Number(a.limit) || 10, 25));
+      .slice(0, Math.max(1, Math.min(Number(a.limit) || 10, 25)));
     return { payments: rows.map(brief) };
   }
   if (name === 'propose_refund' || name === 'propose_cancel') {
@@ -409,10 +435,12 @@ async function runTool(name, a, cards, seen, till) {
     return { proposal: id, status: 'Shown to the cashier — waiting for Confirm.' };
   }
   if (name === 'sales_summary') {
-    const since = Date.now() - Math.max(1, Math.min(Number(a.days) || 1, 90)) * 864e5;
+    // "Today" is since midnight (server TZ, set TZ=Europe/Belgrade in .env), not the last 24 hours.
+    const since = new Date().setHours(0, 0, 0, 0) - (Math.max(1, Math.min(Number(a.days) || 1, 90)) - 1) * 864e5;
     const rows = mine(till).filter(e => Date.parse(e.created) >= since);
-    for (const e of rows.filter(e => e.status === 'awaiting_payment').slice(-10)) await refresh(e).catch(() => {});
-    const sum = s => money(rows.filter(e => e.status === s).reduce((t, e) => t + e.total, 0));
+    await Promise.all(rows.filter(e => e.status === 'awaiting_payment').slice(-10).map(e => refresh(e).catch(() => {})));
+    // Net of partial refunds, as a fully refunded payment already is (it leaves "paid").
+    const sum = s => money(rows.filter(e => e.status === s).reduce((t, e) => t + e.total - (e.refunded || 0), 0));
     const top = {};
     for (const e of rows.filter(e => e.status === 'paid')) for (const l of e.lines) top[l.en] = (top[l.en] || 0) + l.qty;
     return { currency: CUR, payments: rows.length, paid: sum('paid'), awaiting: sum('awaiting_payment'),
@@ -422,9 +450,11 @@ async function runTool(name, a, cards, seen, till) {
   return { error: 'Unknown tool' };
 }
 
-const card = e => ({ ref: e.ref, method: e.kind, status: e.status, error: e.error, total: money(e.total), currency: CUR, customer: e.customer,
+// A URL too long for the encoder must not fail the card: the payment exists at PayPal, the link still works.
+const qrOf = url => { try { return qrSvg(url, { madhesia: 240 }); } catch { return undefined; } };
+const card = (e, withQr = true) => ({ ref: e.ref, method: e.kind, status: e.status, error: e.error, total: money(e.total), currency: CUR, customer: e.customer,
   email: e.email, url: e.url, lines: e.lines, created: e.created, refunded: e.refunded ? money(e.refunded) : undefined,
-  qr: e.status === 'awaiting_payment' && e.url ? qrSvg(e.url, { madhesia: 240 }) : undefined, receipt: receiptUrl(e) });
+  qr: withQr && e.status === 'awaiting_payment' && e.url ? qrOf(e.url) : undefined, receipt: receiptUrl(e) });
 // The receipt link pins the fact's leaf hash in the URL fragment (never sent to the server): if the books are ever
 // edited, the fact the server serves no longer hashes to what the customer's phone holds.
 const receiptUrl = e => lastAudit.has(e.ref) && ['paid', 'refunded'].includes(e.status) ? `/v/${e.ref}#${leaf(lastAudit.get(e.ref)).slice(0, 16)}` : undefined;
@@ -487,18 +517,21 @@ async function chat(history, lang, till) {
 const hits = new Map();
 function limited(ip, max = 40, win = 10 * 60e3) {
   const now = Date.now();
-  if (hits.size > 5000) hits.clear();
+  // Forget only the quiet ones: clearing the whole map let 5000 fresh addresses reset everyone's limit.
+  if (hits.size > 5000) for (const [k, v] of hits) if (now - v.at(-1) >= win) hits.delete(k);
   const h = (hits.get(ip) || []).filter(t => now - t < win);
   h.push(now); hits.set(ip, h);
   return h.length > max;
 }
 const send = (res, code, obj, type = 'application/json') => {
-  res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY' });
   res.end(type === 'application/json' ? JSON.stringify(obj) : obj);
 };
 async function body(req) {
-  let b = '';
-  for await (const c of req) { b += c; if (b.length > 64e3) throw Object.assign(new Error('Too large'), { status: 413 }); }
+  // Bytes, decoded once: a "ë" split across two chunks would otherwise decode as two replacement characters.
+  const parts = []; let n = 0;
+  for await (const c of req) { n += c.length; if (n > 64e3) throw Object.assign(new Error('Too large'), { status: 413 }); parts.push(c); }
+  const b = Buffer.concat(parts).toString('utf8');
   try { return b ? JSON.parse(b) : {}; } catch { throw Object.assign(new Error('Bad JSON'), { status: 400 }); }
 }
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -509,7 +542,7 @@ function paidPage(e, cancelled) {
   return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>SpaceKasa</title>
 <style>body{font:17px system-ui;background:#f4f1ea;color:#1d2a26;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px;box-sizing:border-box}
 main{background:#fff;border-radius:16px;padding:28px;max-width:360px;text-align:center}b{font-size:2em;display:block;margin:8px 0}@media(prefers-color-scheme:dark){body{background:#151b19;color:#e8e4da}main{background:#1f2724}}</style>
-<main><p>${esc(t[0])}<br><small>${esc(t[1])}</small></p>${e ? `<b>${money(e.total)} ${CUR}</b><p>${esc(e.ref)}</p>` : ''}${ok && receiptUrl(e) ? `<div style="background:#fff;border-radius:10px;padding:6px;width:fit-content;margin:8px auto">${qrSvg(BASE_URL + receiptUrl(e), { madhesia: 180 })}</div><p><a href="${esc(receiptUrl(e))}" style="color:inherit">Verify receipt · Verifiko kuponin</a></p>` : ''}<p><small>PayPal sandbox · SpaceKasa</small></p></main>`;
+<main><p>${esc(t[0])}<br><small>${esc(t[1])}</small></p>${e ? `<b>${money(e.total)} ${CUR}</b><p>${esc(e.ref)}</p>` : ''}${ok && receiptUrl(e) ? `<div style="background:#fff;border-radius:10px;padding:6px;width:fit-content;margin:8px auto">${qrSvg(BASE_URL + receiptUrl(e), { madhesia: 180 })}</div><p><a href="${esc(receiptUrl(e))}" style="color:inherit">Verify receipt · Verifiko kuponin</a></p>` : ''}<p><small>${process.env.PAYPAL_ENV === 'live' ? '' : 'PayPal sandbox · '}SpaceKasa</small></p></main>`;
 }
 
 const STATIC = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'],
@@ -526,7 +559,10 @@ http.createServer(async (req, res) => {
       return send(res, 200, fs.readFileSync(path.join(DIR, 'public', f)), type);
     }
     if (u.pathname === '/health') return send(res, 200, { ok: true, payments: ledger.length });
-    // Published audit roots, and a receipt's proofs against them (amounts and states only, no customer data).
+    // The shared fallback till is nobody's: without a till id there is no ledger to read and no money to move back.
+    if (till === 'public' && /^\/api\/(chat|confirm|dismiss|payments?)(\/|$)/.test(u.pathname)) return send(res, 400, { error: 'Send an X-Till id' });
+    // These hash the whole log or call PayPal on every hit: limited too, in their own, roomier bucket.
+    if (req.method === 'GET' && /^\/(api\/(receipt|audit|head)|paid)\b/.test(u.pathname) && limited('get ' + ip, 120)) return send(res, 429, { error: 'Too many requests — wait a few minutes' });
     if (req.method === 'GET' && u.pathname === '/api/procure') {
       const p = procOf(till), o = owners[till];
       return send(res, 200, { mandate: unsig(o?.mandate || DEMO), owner: o ? { key: o.key, mandate: !!o.mandate } : null, supplier: { ...supplies.supplier, email: undefined },
@@ -542,6 +578,7 @@ http.createServer(async (req, res) => {
       const d = auditDay(day);
       return send(res, 200, { day, entries: d.length, root: root(d), chain: chain.length, head: chain.at(-1)?.hash ?? null, intact: intact(chain) });
     }
+    // Published audit roots, and a receipt's proofs against them (amounts and states only, no customer data).
     if (req.method === 'GET' && u.pathname.startsWith('/api/receipt/')) {
       const ref = u.pathname.slice(13).toUpperCase();
       // Each fact with its proof into the day's root and into the whole log up to the last countersigned tree head.
@@ -565,7 +602,11 @@ http.createServer(async (req, res) => {
       await refresh(e);
       return send(res, 200, card(e));
     }
-    if (req.method === 'GET' && u.pathname === '/api/payments') return send(res, 200, mine(till).slice(-30).reverse().map(card));
+    // All of the till's payments since `since` (the browser's midnight), so the day's total is not cut at 30; no QR codes in a list.
+    if (req.method === 'GET' && u.pathname === '/api/payments') {
+      const since = Date.parse(u.searchParams.get('since') || '') || Date.now() - 864e5;
+      return send(res, 200, mine(till).filter(e => Date.parse(e.created) >= since).reverse().slice(0, 1000).map(e => card(e, false)));
+    }
     if (req.method !== 'POST') return send(res, 404, { error: 'Not found' });
     if (limited(ip)) return send(res, 429, { error: 'Too many requests — wait a few minutes' });
     const b = await body(req);
@@ -593,7 +634,8 @@ http.createServer(async (req, res) => {
     // demo under the demo mandate; with real money, nothing.
     if (u.pathname === '/api/procure') {
       const signed = ownerSaid(till, b);
-      if (!signed && process.env.PAYPAL_ENV === 'live') return send(res, 403, { error: 'Owner sign-in required' });
+      // Real money moves only under a mandate the owner signed, never under the server's demo mandate.
+      if (process.env.PAYPAL_ENV === 'live' && !(signed && owners[till].mandate)) return send(res, 403, { error: 'Owner sign-in and an owner-signed mandate required' });
       return send(res, 200, await procureNow(till, signed));
     }
     send(res, 404, { error: 'Not found' });

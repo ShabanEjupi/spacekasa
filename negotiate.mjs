@@ -41,6 +41,8 @@ export async function negotiate(buyer, seller, T = ROUNDS) {
   for (let t = 0; t <= T; t++) {
     const r = await seller.respond({ round: t, sku: buyer.sku, qty: buyer.qty, bid });
     if (!r.qty) { log.push({ round: t, from: 'seller', why: r.why || 'no stock' }); return { deal: null, log }; }
+    // The seller may offer less than we asked for, never more (the mandate alone would let it fill a whole order).
+    if (!(Number.isInteger(r.qty) && r.qty > 0 && r.qty <= buyer.qty)) { log.push({ round: t, from: 'seller', why: `offered ${r.qty}, we asked for ${buyer.qty}` }); return { deal: null, log }; }
     const qty = r.qty;
     // The seller took our last bid. Its reply is the seller's half of the contract; check the mandate once more anyway.
     if (r.accept != null) {
@@ -49,6 +51,8 @@ export async function negotiate(buyer, seller, T = ROUNDS) {
       return { deal: { unit: bid, qty, round: t - 1, seller: r }, log };
     }
     const ask = r.ask;
+    // Whole cents only: the verifier rounds a price to cents, so 1.0049 × 60 would pass as 60.00 and pay 60.29.
+    if (!(typeof ask === 'number' && ask > 0 && cents(ask) === ask)) { log.push({ round: t, from: 'seller', why: `ask ${ask} is not a price in whole cents` }); return { deal: null, log }; }
     log.push({ round: t, from: 'seller', unit: ask, ...env(r) });
     // Take the ask if it is no worse than what we would offer next and the mandate allows it; the seller must confirm.
     const mine = curve(buyer.open, buyer.limit, t + 1, T, buyer.beta);
@@ -61,7 +65,12 @@ export async function negotiate(buyer, seller, T = ROUNDS) {
     }
     // Counter with the most our curve allows this round, cut back to what the mandate allows.
     bid = Math.min(mine, buyer.limit);
-    while (bid > 0 && !allowed(bid, qty).ok) bid = cents(bid - 0.01);
+    if (!allowed(bid, qty).ok) {
+      // The highest whole-cent bid the mandate allows (every limit is an upper bound): a binary search, not 1 400 checks.
+      let lo = 0, hi = Math.round(bid * 100);
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (allowed(m / 100, qty).ok) lo = m; else hi = m; }
+      bid = lo / 100;
+    }
     if (bid < mine) cap = allowed(mine, qty).reasons.join('; ');            // the mandate, not the haggling, held the bid down
     if (bid <= 0) { log.push({ round: t, from: 'buyer', why: allowed(mine, qty).reasons.join('; ') }); return { deal: null, log }; }
     log.push({ round: t, from: 'buyer', unit: bid });
@@ -69,7 +78,7 @@ export async function negotiate(buyer, seller, T = ROUNDS) {
   }
   // The final bid still gets its answer: the seller may take it at the deadline.
   const r = await seller.respond({ round: T + 1, sku: buyer.sku, qty: buyer.qty, bid });
-  if (r.accept != null && r.accept === bid && r.qty && allowed(bid, r.qty).ok) {
+  if (r.accept != null && r.accept === bid && Number.isInteger(r.qty) && r.qty > 0 && r.qty <= buyer.qty && allowed(bid, r.qty).ok) {
     log.push({ round: T + 1, from: 'seller', unit: bid, ok: true, ...env(r) });
     return { deal: { unit: bid, qty: r.qty, round: T, seller: r }, log };
   }

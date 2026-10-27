@@ -6,13 +6,13 @@ const A = {
         make: 'Create owner key in this browser', mine: 'Owner key (stays in this browser, cannot be exported)', other: 'This till has an owner key that is not in this browser.',
         mandate: 'Mandate', perOrder: 'Per order €', perWeek: 'Per week €', factor: 'Max × reference price', until: 'Valid until', sign: 'Sign mandate',
         signed: 'Signed by you', demo: 'Demo mandate (signed by the server)', run: 'Run the agent', running: 'Forecasting, haggling, paying…', nokey: 'This browser cannot make Ed25519 keys — try a current Chrome, Firefox or Safari.',
-        stock: 'stock', perDay: '/day', order: 'order', enough: 'enough stock', paid: 'paid', 'paid part': 'paid part', 'needs a human': 'needs a human',
+        stock: 'stock', perDay: '/day', order: 'order', 'enough stock': 'enough stock', paid: 'paid', 'paid part': 'paid part', 'needs a human': 'needs a human',
         sellerSig: 'supplier signatures verified here', badSig: 'a supplier signature did not verify', payout: 'PayPal payout', contract: 'contract', ask: 'supplier asks', bid: 'our bids', cap: 'mandate cap' },
   sq: { agent: 'Agjenti', title: 'Agjenti i furnizimit', close: 'Mbyll', owner: 'Çelësi i pronarit', none: 'Ende pa pronar: kjo arkë punon me demon sandbox nën mandatin demo.',
         make: 'Krijo çelësin e pronarit te ky shfletues', mine: 'Çelësi i pronarit (rri te ky shfletues, s\'mund të nxirret)', other: 'Kjo arkë ka çelës pronari që nuk është te ky shfletues.',
         mandate: 'Mandati', perOrder: 'Për porosi €', perWeek: 'Në javë €', factor: 'Maks. × çmimi referues', until: 'Vlen deri', sign: 'Nënshkruaj mandatin',
         signed: 'I nënshkruar nga ti', demo: 'Mandati demo (i nënshkruar nga serveri)', run: 'Nise agjentin', running: 'Parashikim, pazar, pagesë…', nokey: 'Ky shfletues s\'krijon dot çelësa Ed25519 — provo Chrome, Firefox ose Safari të ri.',
-        stock: 'gjendja', perDay: '/ditë', order: 'porosi', enough: 'mjafton', paid: 'u pagua', 'paid part': 'u pagua pjesërisht', 'needs a human': 'duhet njeriu',
+        stock: 'gjendja', perDay: '/ditë', order: 'porosi', 'enough stock': 'mjafton', paid: 'u pagua', 'paid part': 'u pagua pjesërisht', 'needs a human': 'duhet njeriu',
         sellerSig: 'nënshkrimet e furnitorit u verifikuan këtu', badSig: 'një nënshkrim i furnitorit s\'u verifikua', payout: 'Pagesë PayPal', contract: 'kontrata', ask: 'furnitori kërkon', bid: 'ofertat tona', cap: 'kufiri i mandatit' },
 };
 const a = k => A[lang][k] ?? k;

@@ -3,7 +3,7 @@
 // neither side can later deny, and its hash goes into the café's audit chain next to the payout.
 // The supplier also witnesses the café's books: it countersigns a tree head only after checking that the chain grew
 // by appending (audit.mjs), so a till that later rewrote a receipt would contradict a signature it does not hold.
-import { sign, verify, createPublicKey, createPrivateKey, generateKeyPairSync, createHash, randomUUID } from 'node:crypto';
+import { sign, verify, createPublicKey, createPrivateKey, generateKeyPairSync, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { canonical } from './mandate.mjs';
 import { strategy, ROUNDS } from './negotiate.mjs';
@@ -11,7 +11,6 @@ import { extend } from './audit.mjs';
 
 export const signObj = (o, priv) => sign(null, Buffer.from(canonical(o)), priv).toString('base64');
 export const verifyObj = (o, sig, pub) => { try { return !!sig && verify(null, Buffer.from(canonical(o)), createPublicKey(pub), Buffer.from(sig, 'base64')); } catch { return false; } };
-export const sha = s => createHash('sha256').update(s).digest('hex');
 // Public key as base64 SPKI DER: what a browser's WebCrypto imports directly.
 export const der = pem => createPublicKey(pem).export({ type: 'spki', format: 'der' }).toString('base64');
 export const pemOf = b64 => createPublicKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'spki' }).export({ type: 'spki', format: 'pem' });
@@ -56,6 +55,8 @@ export function supplierDesk({ catalog, key, log }) {
     const s = strat[msg.sku];
     if (!s) throw Object.assign(new Error(`we do not sell ${msg.sku}`), { status: 400 });
     if (!(Number.isInteger(msg.qty) && msg.qty > 0 && msg.qty <= 10000)) throw Object.assign(new Error('bad quantity'), { status: 400 });
+    // A string bid compares as a number ("9" >= 1.25) and would be logged as the deal, breaking every page that shows it.
+    if (![msg.bid, msg.accept].every(v => v == null || (typeof v === 'number' && Number.isFinite(v) && v > 0))) throw Object.assign(new Error('bad price'), { status: 400 });
     for (const [k, v] of sessions) if (Date.now() - v.at > 10 * 60e3) sessions.delete(k);
     if (!sessions.has(msg.session) && sessions.size >= 2000) throw Object.assign(new Error('busy, try again later'), { status: 429 });
     const st = sessions.get(msg.session) || { round: 0, asks: {}, at: Date.now(), sku: msg.sku, buyer: buyerKey, transcript: [] };

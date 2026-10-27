@@ -83,7 +83,7 @@ function zgjidhVersionin(gjatesia) {
     const numeruesi = v <= 9 ? 8 : 16;
     if (Math.ceil((4 + numeruesi) / 8) + gjatesia <= TABELA[v].data) return v;
   }
-  throw new Error('vargu është shumë i gjatë për versionin 10 te niveli Q');
+  throw new Error('Text too long for a version 10 QR code at level Q');
 }
 
 function bitetEBajteve(teksti) {

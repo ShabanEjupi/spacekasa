@@ -28,7 +28,8 @@ async function render() {
   const ol = $('#checks');
   if (!data) { ol.replaceChildren(row(false, t('missing'))); return; }
   const leaves = await Promise.all(data.facts.map(f => SK.leaf(f.fact)));
-  const i = pin ? leaves.findIndex(h => h.startsWith(pin)) : leaves.length - 1, f = data.facts[Math.max(i, 0)];
+  // The QR pins 16 hex digits; a shorter "pin" (one digit matches 1 in 16 leaves) must not earn a ✓.
+  const i = pin ? leaves.findIndex(h => pin.length >= 16 && h.startsWith(pin)) : leaves.length - 1, f = data.facts[Math.max(i, 0)];
   $('#status').textContent = t(f.fact.status);
   $('#amount').textContent = `${(f.fact.total / 100).toFixed(2)} €`;
   $('#when').textContent = new Date(f.fact.at).toLocaleString(lang === 'sq' ? 'sq-AL' : 'en-GB');
